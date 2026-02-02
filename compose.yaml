@@ -1,0 +1,9 @@
+services:
+  agent_citas:
+    build:
+      context: .
+    ports:
+      - "8002:8002"
+    env_file:
+      - .env
+    restart: unless-stopped

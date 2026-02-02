@@ -1,0 +1,218 @@
+"""
+Sistema de métricas y observabilidad para el agente de citas.
+Usa Prometheus para tracking de performance y uso.
+"""
+
+from prometheus_client import Counter, Histogram, Gauge, Info
+import time
+from contextlib import contextmanager
+from typing import Optional
+
+# ========== CONTADORES ==========
+
+# Conversaciones
+chat_requests_total = Counter(
+    'agent_reservas_chat_requests_total',
+    'Total de mensajes recibidos por el agente',
+    ['session_id']
+)
+
+chat_errors_total = Counter(
+    'agent_reservas_chat_errors_total',
+    'Total de errores en el procesamiento de mensajes',
+    ['error_type']
+)
+
+# Citas
+booking_attempts_total = Counter(
+    'agent_reservas_booking_attempts_total',
+    'Total de intentos de cita'
+)
+
+booking_success_total = Counter(
+    'agent_reservas_booking_success_total',
+    'Total de citas exitosas'
+)
+
+booking_failed_total = Counter(
+    'agent_reservas_booking_failed_total',
+    'Total de citas fallidas',
+    ['reason']
+)
+
+# Tools
+tool_calls_total = Counter(
+    'agent_reservas_tool_calls_total',
+    'Total de llamadas a tools',
+    ['tool_name']
+)
+
+tool_errors_total = Counter(
+    'agent_reservas_tool_errors_total',
+    'Total de errores en tools',
+    ['tool_name', 'error_type']
+)
+
+# API calls
+api_calls_total = Counter(
+    'agent_reservas_api_calls_total',
+    'Total de llamadas a APIs externas',
+    ['endpoint', 'status']
+)
+
+# ========== HISTOGRAMAS (LATENCIA) ==========
+
+chat_response_duration_seconds = Histogram(
+    'agent_reservas_chat_response_duration_seconds',
+    'Tiempo de respuesta del chat en segundos',
+    buckets=(0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 90.0)
+)
+
+tool_execution_duration_seconds = Histogram(
+    'agent_reservas_tool_execution_duration_seconds',
+    'Tiempo de ejecución de tools en segundos',
+    ['tool_name'],
+    buckets=(0.1, 0.5, 1.0, 2.0, 5.0, 10.0)
+)
+
+api_call_duration_seconds = Histogram(
+    'agent_reservas_api_call_duration_seconds',
+    'Tiempo de llamadas a API en segundos',
+    ['endpoint'],
+    buckets=(0.1, 0.5, 1.0, 2.0, 5.0, 10.0)
+)
+
+llm_call_duration_seconds = Histogram(
+    'agent_reservas_llm_call_duration_seconds',
+    'Tiempo de llamadas al LLM en segundos',
+    buckets=(0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 30.0, 60.0, 90.0)
+)
+
+# ========== GAUGES (ESTADO ACTUAL) ==========
+
+cache_entries = Gauge(
+    'agent_reservas_cache_entries',
+    'Número de entradas en cache',
+    ['cache_type']
+)
+
+# ========== INFO ==========
+
+agent_info = Info(
+    'agent_reservas_info',
+    'Información del agente de citas'
+)
+
+# ========== CONTEXT MANAGERS ==========
+
+@contextmanager
+def track_chat_response():
+    """Context manager para trackear duración de respuestas del chat."""
+    start_time = time.time()
+    try:
+        yield
+    finally:
+        duration = time.time() - start_time
+        chat_response_duration_seconds.observe(duration)
+
+
+@contextmanager
+def track_tool_execution(tool_name: str):
+    """Context manager para trackear duración de ejecución de tools."""
+    start_time = time.time()
+    tool_calls_total.labels(tool_name=tool_name).inc()
+    try:
+        yield
+    except Exception as e:
+        tool_errors_total.labels(
+            tool_name=tool_name,
+            error_type=type(e).__name__
+        ).inc()
+        raise
+    finally:
+        duration = time.time() - start_time
+        tool_execution_duration_seconds.labels(tool_name=tool_name).observe(duration)
+
+
+@contextmanager
+def track_api_call(endpoint: str):
+    """Context manager para trackear duración de llamadas a API."""
+    start_time = time.time()
+    status = "unknown"
+    try:
+        yield
+        status = "success"
+    except Exception as e:
+        status = f"error_{type(e).__name__}"
+        raise
+    finally:
+        duration = time.time() - start_time
+        api_call_duration_seconds.labels(endpoint=endpoint).observe(duration)
+        api_calls_total.labels(endpoint=endpoint, status=status).inc()
+
+
+@contextmanager
+def track_llm_call():
+    """Context manager para trackear duración de llamadas al LLM."""
+    start_time = time.time()
+    try:
+        yield
+    finally:
+        duration = time.time() - start_time
+        llm_call_duration_seconds.observe(duration)
+
+
+# ========== FUNCIONES DE UTILIDAD ==========
+
+def record_booking_attempt():
+    """Registra un intento de cita."""
+    booking_attempts_total.inc()
+
+
+def record_booking_success():
+    """Registra una cita exitosa."""
+    booking_success_total.inc()
+
+
+def record_booking_failure(reason: str):
+    """Registra una cita fallida."""
+    booking_failed_total.labels(reason=reason).inc()
+
+
+def record_chat_error(error_type: str):
+    """Registra un error en el chat."""
+    chat_errors_total.labels(error_type=error_type).inc()
+
+
+def update_cache_stats(cache_type: str, count: int):
+    """Actualiza estadísticas de cache."""
+    cache_entries.labels(cache_type=cache_type).set(count)
+
+
+def initialize_agent_info(model: str, version: str = "1.0.0"):
+    """Inicializa información del agente."""
+    agent_info.info({
+        'version': version,
+        'model': model,
+        'agent_type': 'citas'
+    })
+
+
+__all__ = [
+    # Tracking functions
+    'track_chat_response',
+    'track_tool_execution',
+    'track_api_call',
+    'track_llm_call',
+    # Recording functions
+    'record_booking_attempt',
+    'record_booking_success',
+    'record_booking_failure',
+    'record_chat_error',
+    'update_cache_stats',
+    'initialize_agent_info',
+    # Metrics (para acceso directo si necesario)
+    'chat_requests_total',
+    'booking_success_total',
+    'booking_failed_total',
+]
