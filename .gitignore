@@ -11,7 +11,7 @@ ENV/
 build/
 dist/
 *.egg-info/
-
+.claude 
 # Environment
 .env
 .env.local

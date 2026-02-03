@@ -41,7 +41,10 @@ El agente internamente usa dos herramientas propias:
         "personalidad": "amable y profesional",
         "duracion_cita_minutos": 60,
         "slots": 60,
-        "agendar_usuario": true
+        "agendar_usuario": 1,
+        "id_usuario": 1,
+        "correo_usuario": "vendedor@empresa.com",
+        "agendar_sucursal": 0
       }
     }
   }
@@ -64,7 +67,12 @@ El agente internamente usa dos herramientas propias:
 | `personalidad` | string | ❌ No | `"amable, profesional y eficiente"` | Personalidad del agente |
 | `duracion_cita_minutos` | integer | ❌ No | `60` | Duración de la cita en minutos |
 | `slots` | integer | ❌ No | `60` | Cantidad de slots disponibles |
-| `agendar_usuario` | boolean/integer | ❌ No | `1` | Usuario que agenda (true=1, false=0) |
+| `agendar_usuario` | boolean/integer | ❌ No | `1` | Flag para agendar por usuario (true=1, false=0) |
+| `id_usuario` | integer | ❌ No | `1` | ID del vendedor/usuario en el sistema |
+| `correo_usuario` | string | ❌ No | `""` | Email del vendedor (para invitaciones de calendario) |
+| `agendar_sucursal` | integer | ❌ No | `0` | Flag para agendar por sucursal (0=no, 1=sí) |
+
+**Nota importante:** El orquestador no envía `id_prospecto`. El agente usa `session_id` como identificador del prospecto internamente.
 
 ---
 
@@ -139,7 +147,7 @@ El agente mantiene el contexto de la conversación usando `session_id`, por lo q
 **Response:**
 ```json
 {
-  "result": "Cita confirmada exitosamente\n\n**Detalles:**\n• Servicio: Corte de cabello\n• Fecha: 2026-01-29\n• Hora: 03:00 PM\n• Nombre: Juan Pérez\n\n¡Te esperamos!"
+  "result": "Evento agregado correctamente\n\n**Detalles:**\n• Servicio: Corte de cabello\n• Fecha: 2026-01-29\n• Hora: 03:00 PM\n• Nombre: Juan Pérez\n\nLa reunión será por videollamada. Enlace: https://meet.google.com/xxx-xxxx-xxx\n\n¡Te esperamos!"
 }
 ```
 
@@ -322,7 +330,7 @@ Ver todas las métricas disponibles en el endpoint `/metrics`.
    - Horarios disponibles (contra API)
    - Disponibilidad real (slots ocupados)
 
-4. **Confirmación**: La confirmación y el enlace (si aplica) vienen de la API externa (ws_calendario). NO son inventados por el LLM.
+4. **Confirmación**: La confirmación y el enlace de Google Meet vienen de la API externa (`ws_calendario.php` con `CREAR_EVENTO`). NO son inventados por el LLM.
 
 5. **Personalidad configurable**: Se puede ajustar por empresa enviando `context.config.personalidad`.
 

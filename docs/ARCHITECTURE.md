@@ -21,10 +21,11 @@ El **Agent Citas** es un microservicio de IA conversacional que automatiza la ge
 ### Información del Proyecto
 
 - **Versión**: 2.0.0
-- **Líneas de código**: ~2,534
+- **Líneas de código**: ~2,500+
 - **Lenguaje**: Python 3.10+
 - **Arquitectura**: Microservicio asíncrono con MCP
 - **LLM**: GPT-4o-mini (configurable a GPT-4o)
+- **Última actualización**: 2026-02
 
 ### Stack Tecnológico
 
@@ -73,7 +74,7 @@ El **Agent Citas** es un microservicio de IA conversacional que automatiza la ge
 │                   AGENT RESERVAS (Puerto 8003)                  │
 │                                                                 │
 │  ┌────────────────────────────────────────────────────────┐    │
-│  │  main.py (Servidor MCP - 148 líneas)                   │    │
+│  │  main.py (Servidor MCP)                                │    │
 │  │  ┌──────────────┐         ┌──────────────┐            │    │
 │  │  │  FastMCP     │◄───────►│  @mcp.tool() │            │    │
 │  │  │  Server      │         │  chat()      │            │    │
@@ -83,7 +84,7 @@ El **Agent Citas** es un microservicio de IA conversacional que automatiza la ge
 │                                    │ Invoca                   │
 │                                    ↓                          │
 │  ┌────────────────────────────────────────────────────────┐  │
-│  │  agent.py (Lógica LangChain - 241 líneas)             │  │
+│  │  agent/agent.py (Lógica LangChain)                    │  │
 │  │                                                        │  │
 │  │  process_cita_message(message, session_id, context) │  │
 │  │         │                                              │  │
@@ -101,7 +102,7 @@ El **Agent Citas** es un microservicio de IA conversacional que automatiza la ge
 │                           │ LLM decide tool                  │
 │                           ↓                                  │
 │  ┌─────────────────────────────────────────────────────┐    │
-│  │  tools.py (Herramientas Internas - 215 líneas)     │    │
+│  │  tool/tools.py (Herramientas Internas)             │    │
 │  │                                                     │    │
 │  │  AGENT_TOOLS = [check_availability, create_booking]│    │
 │  └──────────────┬────────────────────┬─────────────────┘    │
@@ -124,9 +125,9 @@ El **Agent Citas** es un microservicio de IA conversacional que automatiza la ge
 │         │                             │                    │
 │         ↓                             ↓                    │
 │  ┌────────────────────┐     ┌───────────────────────┐     │
-│  │schedule_validator  │     │ validation.py         │     │
-│  │    .py             │     │ (Pydantic Models)     │     │
-│  │ (455 líneas)       │     │ (258 líneas)          │     │
+│  │services/schedule   │     │ validation.py         │     │
+│  │  _validator.py     │     │ (Pydantic Models)     │     │
+│  │ (~548 líneas)      │     │                       │     │
 │  │                    │     │                       │     │
 │  │ - _fetch_schedule()│     │ - ContactInfo         │     │
 │  │   + CACHE (5 min)  │     │ - CustomerName        │     │
@@ -135,8 +136,8 @@ El **Agent Citas** es un microservicio de IA conversacional que automatiza la ge
 │  │   availability()   │     └───────────────────────┘     │
 │  └────────┬───────────┘                                    │
 │           │                      ┌───────────────────┐     │
-│           │                      │ booking.py        │     │
-│           │                      │ (158 líneas)      │     │
+│           │                      │ services/         │     │
+│           │                      │   booking.py      │     │
 │           │                      │                   │     │
 │           │                      │ confirm_booking() │     │
 │           │                      └────────┬──────────┘     │
@@ -152,28 +153,34 @@ El **Agent Citas** es un microservicio de IA conversacional que automatiza la ge
 │  │                                                    │   │
 │  │  2. n8n/ws_agendar_reunion.php                     │   │
 │  │     CONSULTAR_DISPONIBILIDAD                       │   │
-│  │     AGENDAR_REUNION                                │   │
+│  │     SUGERIR_HORARIOS                               │   │
+│  │                                                    │   │
+│  │  3. n8n/ws_calendario.php                          │   │
+│  │     CREAR_EVENTO (usado por booking.py)            │   │
 │  └────────────────────────────────────────────────────┘   │
 │                                                           │
 │  ┌─────────────────────────────────────────────────┐     │
 │  │  MÓDULOS DE SOPORTE                             │     │
 │  │                                                 │     │
-│  │  - config.py (39 líneas)                        │     │
+│  │  - config/config.py                             │     │
 │  │    Variables de entorno                         │     │
 │  │                                                 │     │
-│  │  - logger.py (79 líneas)                        │     │
+│  │  - config/models.py                             │     │
+│  │    CitaConfig (Pydantic)                        │     │
+│  │                                                 │     │
+│  │  - logger.py                                    │     │
 │  │    Sistema de logging centralizado              │     │
 │  │                                                 │     │
-│  │  - metrics.py (219 líneas)                      │     │
+│  │  - metrics.py                                   │     │
 │  │    Métricas Prometheus (13 métricas)            │     │
 │  │    Expuesto en /metrics                         │     │
 │  │                                                 │     │
-│  │  - models.py (38 líneas)                        │     │
-│  │    ChatRequest, ChatResponse, CitaConfig     │     │
+│  │  - services/horario_reuniones.py                │     │
+│  │    Obtención de horarios para system prompt     │     │
 │  │                                                 │     │
-│  │  - prompts/ (56 + 166 líneas)                   │     │
+│  │  - prompts/                                     │     │
 │  │    __init__.py - Builder de prompts             │     │
-│  │    citas_system.j2 - Template Jinja2          │     │
+│  │    citas_system.j2 - Template Jinja2            │     │
 │  └─────────────────────────────────────────────────┘     │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -182,7 +189,7 @@ El **Agent Citas** es un microservicio de IA conversacional que automatiza la ge
 
 ## Descripción Detallada de Archivos
 
-### 1. src/citas/main.py (148 líneas)
+### 1. src/citas/main.py
 
 **Propósito:** Punto de entrada del sistema. Servidor MCP que expone la tool `chat` al orquestador.
 
@@ -239,7 +246,7 @@ if __name__ == "__main__":
 
 ---
 
-### 2. src/citas/agent.py (241 líneas)
+### 2. src/citas/agent/agent.py
 
 **Propósito:** Lógica central del agente de IA usando LangChain 1.2+ API moderna.
 
@@ -262,15 +269,19 @@ if __name__ == "__main__":
 - **Limitación**: Volátil (se pierde al reiniciar)
 
 #### `AgentContext` (dataclass)
-- **Líneas**: 33-44
 - **Campos**:
   - `id_empresa: int` - **Requerido**
   - `duracion_cita_minutos: int = 60`
   - `slots: int = 60`
+  - `agendar_usuario: int = 1` - Flag para agendar por usuario
   - `id_usuario: int = 1`
+  - `correo_usuario: str = ""` - Email del vendedor/usuario
+  - `agendar_sucursal: int = 0` - Flag para agendar por sucursal
+  - `id_prospecto: str = ""` - ID del prospecto (normalmente = session_id)
   - `session_id: str = ""`
 - **Propósito**: Esquema de runtime context para tools
 - **Uso**: Inyectado automáticamente por LangChain
+- **Nota**: El orquestador no envía `id_prospecto`; el agente usa `session_id` como identificador del prospecto
 
 **Funciones principales:**
 
@@ -296,9 +307,9 @@ if __name__ == "__main__":
 model = init_chat_model(
     f"openai:{app_config.OPENAI_MODEL}",  # gpt-4o-mini
     api_key=app_config.OPENAI_API_KEY,
-    temperature=0.4,
-    max_tokens=app_config.MAX_TOKENS,      # 2048
-    timeout=app_config.OPENAI_TIMEOUT,     # 90s
+    temperature=app_config.OPENAI_TEMPERATURE,  # 0.5 (configurable)
+    max_tokens=app_config.MAX_TOKENS,           # 2048
+    timeout=app_config.OPENAI_TIMEOUT,          # 90s
 )
 ```
 
@@ -354,7 +365,7 @@ with track_chat_response():
 
 ---
 
-### 3. src/citas/tools.py (215 líneas)
+### 3. src/citas/tool/tools.py
 
 **Propósito:** Herramientas internas que el LLM usa para consultar disponibilidad y crear citas/eventos.
 
@@ -368,13 +379,13 @@ with track_chat_response():
 
 **Tools disponibles:**
 
-#### `check_availability(service: str, date: str, runtime: ToolRuntime) -> str`
-- **Líneas**: 28-86
+#### `check_availability(service: str, date: str, time: Optional[str], runtime: ToolRuntime) -> str`
 - **Decorador**: `@tool`
 - **Propósito**: Consulta horarios disponibles
 - **Parámetros**:
   - `service` (str): Nombre del servicio (ej: "corte", "manicure")
   - `date` (str): Fecha en formato YYYY-MM-DD
+  - `time` (str, opcional): Hora específica a consultar
   - `runtime` (ToolRuntime): Context automático de LangChain
 - **Extrae del runtime.context**:
   - `id_empresa`
@@ -484,7 +495,7 @@ Guarda este código para futuras consultas. ¡Te esperamos!
 
 ---
 
-### 4. src/citas/schedule_validator.py (455 líneas)
+### 4. src/citas/services/schedule_validator.py (~548 líneas)
 
 **Propósito:** Validación de horarios con cache global y consulta a API externa.
 
@@ -734,7 +745,7 @@ return {"valid": True, "error": None}
 
 ---
 
-### 5. src/citas/booking.py (158 líneas)
+### 5. src/citas/services/booking.py
 
 **Propósito:** Crear eventos/citas en la API real de MaravIA (ws_calendario).
 
@@ -742,36 +753,36 @@ return {"valid": True, "error": None}
 
 **Responsabilidades:**
 - Enviar datos de evento/cita a API externa
-- Obtener código de confirmación
+- Obtener enlace de Google Meet (si aplica)
 - Registrar métricas de éxito/fallo
 - Manejo de errores HTTP
 
 **Constante:**
 ```python
-AGENDAR_REUNIONES_ENDPOINT = "https://api.maravia.pe/servicio/n8n/ws_agendar_reunion.php"
+CALENDAR_ENDPOINT = "https://api.maravia.pe/servicio/n8n/ws_calendario.php"
 ```
 
 **Función principal:**
 
 #### `confirm_booking(...) -> Dict[str, Any]`
-- **Líneas**: 23-154
 - **Parámetros**:
-  - `id_empresa: int`
-  - `id_prospecto: str` - Session ID
-  - `nombre_completo: str`
-  - `correo_o_telefono: str`
+  - `id_usuario: int` - ID del vendedor/usuario
+  - `id_prospecto: str` - Session ID (identificador del prospecto)
+  - `nombre_completo: str` - Nombre del cliente
+  - `correo_cliente: str` - Email del cliente
   - `fecha: str` - YYYY-MM-DD
   - `hora: str` - HH:MM AM/PM
-  - `servicio: str`
-  - `id_usuario: int`
-  - `sucursal: str = None` (opcional)
+  - `servicio: str` - Título/motivo de la cita
+  - `agendar_usuario: int` - Flag 1/0
+  - `duracion_cita_minutos: int = 60`
+  - `correo_usuario: str = ""` - Email del vendedor (opcional)
 
 - **Retorna**:
   ```python
   {
       "success": bool,
-      "codigo": str | None,  # Mensaje o enlace si success=True
       "message": str,
+      "google_meet_link": str | None,  # Enlace de Google Meet si aplica
       "error": str | None
   }
   ```
@@ -783,29 +794,27 @@ AGENDAR_REUNIONES_ENDPOINT = "https://api.maravia.pe/servicio/n8n/ws_agendar_reu
    record_booking_attempt()  # Métrica
    ```
 
-2. **Preparar payload**:
+2. **Preparar payload (CREAR_EVENTO)**:
    ```python
    payload = {
-       "codOpe": "AGENDAR_REUNION",
-       "id_empresa": 123,
-       "id_prospecto": "session-id",
-       "nombre_completo": "Juan Pérez",
-       "correo_electronico": "987654321",  # ← Nota: campo es "correo_electronico" aunque puede ser teléfono
-       "fecha_cita": "2026-01-29",
-       "hora_cita": "02:00 PM",
-       "servicio": "Corte de cabello",
-       "id_usuario": 1
+       "codOpe": "CREAR_EVENTO",
+       "id_usuario": 1,
+       "id_prospecto": "sess-002",
+       "titulo": "Corte de cabello",
+       "fecha_inicio": "2026-01-29 14:00:00",
+       "fecha_fin": "2026-01-29 15:00:00",
+       "correo_cliente": "cliente@ejemplo.com",
+       "correo_usuario": "vendedor@ejemplo.com",
+       "agendar_usuario": 1
    }
-   if sucursal:
-       payload["sucursal"] = sucursal
    ```
 
-3. **Llamar API**:
+3. **Llamar API (ws_calendario.php)**:
    ```python
-   with track_api_call("agendar_reunion"):
+   with track_api_call("crear_evento"):
        async with httpx.AsyncClient(timeout=API_TIMEOUT) as client:
            response = await client.post(
-               AGENDAR_REUNIONES_ENDPOINT,
+               CALENDAR_ENDPOINT,  # ws_calendario.php
                json=payload,
                headers={"Content-Type": "application/json"}
            )
@@ -816,12 +825,12 @@ AGENDAR_REUNIONES_ENDPOINT = "https://api.maravia.pe/servicio/n8n/ws_agendar_reu
 4. **Procesar respuesta**:
    ```python
    if data.get("success"):
-       codigo = data.get("codigo_cita")  # "RES-12345"
+       google_meet_link = data.get("google_meet_link")
        record_booking_success()
        return {
            "success": True,
-           "codigo": codigo,
-           "message": f"Cita confirmada... {codigo or ''}",
+           "message": data.get("message", "Evento agregado correctamente"),
+           "google_meet_link": google_meet_link,
            "error": None
        }
    else:
@@ -829,8 +838,8 @@ AGENDAR_REUNIONES_ENDPOINT = "https://api.maravia.pe/servicio/n8n/ws_agendar_reu
        record_booking_failure("api_error")
        return {
            "success": False,
-           "codigo": None,
            "message": "No se pudo confirmar...",
+           "google_meet_link": None,
            "error": error_msg
        }
    ```
@@ -861,17 +870,17 @@ AGENDAR_REUNIONES_ENDPOINT = "https://api.maravia.pe/servicio/n8n/ws_agendar_reu
   return {..., "error": str(e)}
   ```
 
-**Es llamado por:** `tools.create_booking()`
+**Es llamado por:** `tool/tools.create_booking()`
 
 **Llama a:**
-- API externa (httpx async)
+- API externa: `ws_calendario.php` (CREAR_EVENTO)
 - `logger.*`
 - `metrics.record_booking_attempt/success/failure()`
-- `config.API_TIMEOUT`
+- `config.API_TIMEOUT`, `config.API_CALENDAR_URL`
 
 ---
 
-### 6. src/citas/validation.py (258 líneas)
+### 6. src/citas/validation.py
 
 **Propósito:** Validadores de datos con Pydantic 2.6+.
 
@@ -987,7 +996,7 @@ BookingData(
 
 ---
 
-### 7. src/citas/config.py (39 líneas)
+### 7. src/citas/config/config.py
 
 **Propósito:** Configuración centralizada desde variables de entorno.
 
@@ -1003,36 +1012,41 @@ BookingData(
 from pathlib import Path
 from dotenv import load_dotenv
 
-_BASE_DIR = Path(__file__).resolve().parent.parent.parent
+_BASE_DIR = Path(__file__).resolve().parent.parent.parent.parent
 load_dotenv(_BASE_DIR / ".env")
 ```
 
-**Variables (11 configurables):**
+**Variables (15+ configurables):**
 
 ```python
 # OpenAI
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+OPENAI_TEMPERATURE = float(os.getenv("OPENAI_TEMPERATURE", "0.5"))
+OPENAI_TIMEOUT = int(os.getenv("OPENAI_TIMEOUT", "90"))
+MAX_TOKENS = int(os.getenv("MAX_TOKENS", "2048"))
 
 # Servidor
 SERVER_HOST = os.getenv("SERVER_HOST", "0.0.0.0")
 SERVER_PORT = int(os.getenv("SERVER_PORT", "8003"))
-
-# Futuras (no usadas)
-DATABASE_URL = os.getenv("DATABASE_URL", "")
-REDIS_URL = os.getenv("REDIS_URL", "")
 
 # Logging
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 LOG_FILE = os.getenv("LOG_FILE", "")
 
 # Timeouts
-OPENAI_TIMEOUT = int(os.getenv("OPENAI_TIMEOUT", "90"))
 API_TIMEOUT = int(os.getenv("API_TIMEOUT", "10"))
-MAX_TOKENS = int(os.getenv("MAX_TOKENS", "2048"))
 
 # Cache
 SCHEDULE_CACHE_TTL_MINUTES = int(os.getenv("SCHEDULE_CACHE_TTL_MINUTES", "5"))
+
+# Timezone
+TIMEZONE = os.getenv("TIMEZONE", "America/Lima")
+
+# APIs MaravIA
+API_CALENDAR_URL = os.getenv("API_CALENDAR_URL", "https://api.maravia.pe/servicio/n8n/ws_calendario.php")
+API_AGENDAR_REUNION_URL = os.getenv("API_AGENDAR_REUNION_URL", "https://api.maravia.pe/servicio/n8n/ws_agendar_reunion.php")
+API_INFORMACION_URL = os.getenv("API_INFORMACION_URL", "https://api.maravia.pe/servicio/ws_informacion_ia.php")
 ```
 
 **Es llamado por:** TODOS los módulos (importado como `app_config`)
@@ -1041,7 +1055,7 @@ SCHEDULE_CACHE_TTL_MINUTES = int(os.getenv("SCHEDULE_CACHE_TTL_MINUTES", "5"))
 
 ---
 
-### 8. src/citas/logger.py (79 líneas)
+### 8. src/citas/logger.py
 
 **Propósito:** Sistema de logging centralizado.
 
@@ -1098,7 +1112,7 @@ logger = get_logger("citas")
 
 ---
 
-### 9. src/citas/metrics.py (219 líneas)
+### 9. src/citas/metrics.py
 
 **Propósito:** Sistema de métricas Prometheus.
 
@@ -1201,7 +1215,7 @@ logger = get_logger("citas")
 
 ---
 
-### 10. src/citas/models.py (38 líneas)
+### 10. src/citas/config/models.py
 
 **Propósito:** Modelos Pydantic para requests/responses.
 
@@ -1214,32 +1228,17 @@ logger = get_logger("citas")
 
 **Modelos:**
 
-#### `ChatRequest`
-- **Líneas**: 9-17
-- **Campos**:
-  - `message: str`
-  - `session_id: str`
-  - `context: Dict[str, Any] = {}`
-
-#### `ChatResponse`
-- **Líneas**: 20-28
-- **Campos**:
-  - `reply: str`
-  - `session_id: str`
-  - `metadata: Optional[Dict[str, Any]] = None`
-
 #### `CitaConfig`
-- **Líneas**: 31-38
 - **Campos**:
   - `personalidad: str = "amable, profesional y eficiente"`
 
-**Es llamado por:** `agent.py` (valida config)
+**Es llamado por:** `agent/agent.py` (valida config)
 
 **No llama a otros módulos internos**
 
 ---
 
-### 11. src/citas/prompts/__init__.py (56 líneas)
+### 11. src/citas/prompts/__init__.py
 
 **Propósito:** Constructor de system prompt con Jinja2.
 
@@ -1248,6 +1247,8 @@ logger = get_logger("citas")
 **Responsabilidades:**
 - Cargar template desde archivo
 - Aplicar defaults a configuración
+- Obtener fecha/hora de Perú (timezone America/Lima)
+- Obtener horarios de reuniones desde API
 - Renderizar prompt con variables
 
 **Constantes:**
@@ -1262,19 +1263,19 @@ _DEFAULTS = {
 **Funciones:**
 
 #### `_apply_defaults(config: Dict) -> Dict`
-- **Líneas**: 16-22
 - **Propósito**: Merge config con defaults
 - **Lógica**: Solo aplica valores no None, no "", no []
 
 #### `build_citas_system_prompt(config: Dict, history: List[Dict]) -> str`
-- **Líneas**: 25-52
 - **Propósito**: Construir system prompt completo
 - **Proceso**:
   1. Crear Jinja2 environment
   2. Cargar template "citas_system.j2"
   3. Aplicar defaults
-  4. Agregar history y has_history
-  5. Renderizar template
+  4. Obtener fecha/hora actual de Perú
+  5. Obtener horarios de reuniones (desde `services/horario_reuniones.py`)
+  6. Agregar history y has_history
+  7. Renderizar template
 - **Retorna**: System prompt formateado (string)
 
 **Ejemplo de variables:**
@@ -1294,7 +1295,7 @@ _DEFAULTS = {
 
 ---
 
-### 12. src/citas/prompts/citas_system.j2 (166 líneas)
+### 12. src/citas/prompts/citas_system.j2
 
 **Propósito:** Template Jinja2 del system prompt.
 
@@ -1308,57 +1309,58 @@ _DEFAULTS = {
 
 **Estructura del template:**
 
-1. **Rol** (líneas 1-12)
+1. **Rol**
    - Descripción del agente
    - Función principal
-   - Datos necesarios
+   - Datos necesarios (motivo, fecha, hora, nombre, email)
 
-2. **Personalidad** (líneas 13-15)
+2. **Contexto temporal**
+   ```jinja
+   Fecha y hora actual (Perú): {{ fecha_hora_peru }}
+   ```
+
+3. **Personalidad**
    ```jinja
    Eres {{ personalidad }}.
    ```
 
-3. **Herramientas disponibles** (líneas 17-37)
-   - `check_availability(service, date)`
+4. **Horarios de atención**
+   ```jinja
+   {{ horario_reuniones }}
+   ```
+
+5. **Herramientas disponibles**
+   - `check_availability(service, date, time)` - time es opcional
    - `create_booking(service, date, time, customer_name, customer_contact)`
    - Instrucciones de uso
 
-4. **Historial** (líneas 39-58)
+6. **Historial** (condicional)
    ```jinja
    {% if has_history %}
    ## Historial de esta Conversación
    {% for turn in history %}
-   **Turno {{ loop.index }}:**
-   - Usuario: "{{ turn.user }}"
-   - Respondiste: "{{ turn.response }}"
+   ...
    {% endfor %}
    {% endif %}
    ```
 
-5. **Flujo de trabajo** (líneas 60-68)
-   - Pasos a seguir
+7. **Flujo de captura de datos**
+   - Qué preguntar según datos faltantes (motivo, fecha, hora, nombre, email)
 
-6. **Flujo de captura de datos** (líneas 70-90)
-   - Qué preguntar según datos faltantes
-
-7. **Reglas importantes** (líneas 92-100)
+8. **Reglas importantes**
    - Una pregunta a la vez
    - Brevedad
-   - Confirmación
-   - etc.
+   - Confirmación antes de crear
 
-8. **Casos especiales** (líneas 102-121)
+9. **Casos especiales**
    - Consulta de disponibilidad
    - Modificación
    - Cancelación
 
-9. **Ejemplos** (líneas 125-162)
-   - Flujo completo desde cero
-   - Flujo con información completa
-   - Flujo de modificación
-
 **Variables usadas:**
 - `{{ personalidad }}` - Personalidad del agente
+- `{{ fecha_hora_peru }}` - Fecha/hora actual de Perú
+- `{{ horario_reuniones }}` - Horarios de atención de la empresa
 - `{{ history }}` - Lista de turnos previos
 - `{{ has_history }}` - Boolean si hay historial
 
@@ -1366,7 +1368,41 @@ _DEFAULTS = {
 
 ---
 
-### 13. src/citas/__init__.py (42 líneas)
+### 13. src/citas/services/horario_reuniones.py
+
+**Propósito:** Obtener horarios de reuniones para inyectar en el system prompt.
+
+**Tecnología:** httpx async
+
+**Responsabilidades:**
+- Consultar API de información para obtener horarios
+- Formatear horarios para el prompt
+- Manejar errores de conexión
+
+**Función principal:**
+
+#### `fetch_horario_reuniones(id_empresa: int) -> str`
+- **Propósito**: Obtener horarios formateados para el system prompt
+- **API Call**:
+  ```python
+  POST https://api.maravia.pe/servicio/ws_informacion_ia.php
+  Payload: {
+      "codOpe": "OBTENER_HORARIO_REUNIONES",
+      "id_empresa": 123
+  }
+  ```
+- **Retorna**: Texto formateado con horarios por día de la semana
+- **Fallback**: Si falla, retorna string vacío (graceful degradation)
+
+**Es llamado por:** `prompts/__init__.py`
+
+**Llama a:**
+- API externa: `ws_informacion_ia.php`
+- `config.API_INFORMACION_URL`
+
+---
+
+### 14. src/citas/__init__.py
 
 **Propósito:** Módulo de inicialización y exports.
 
@@ -1383,7 +1419,7 @@ __author__ = "MaravIA Team"
 
 **Exports:**
 ```python
-from .agent import process_cita_message
+from .agent.agent import process_cita_message
 from .logger import get_logger, setup_logging
 from .metrics import (
     track_chat_response,
@@ -1946,25 +1982,27 @@ booking_result = await confirm_booking(...)
 ## Dependencias entre Archivos
 
 ```
-config.py (0 dependencias internas)
+config/config.py (0 dependencias internas)
     ↑
     ├── logger.py (1 dep: config)
     │       ↑
     ├── metrics.py (1 dep: config)
     │       ↑
-    └── models.py (1 dep: pydantic)
+    └── config/models.py (1 dep: pydantic)
             ↑
             ├── validation.py (2 deps: models, pydantic)
             │       ↑
-            ├── schedule_validator.py (4 deps: config, logger, metrics, httpx)
+            ├── services/schedule_validator.py (4 deps: config, logger, metrics, httpx)
             │       ↑
-            └── booking.py (4 deps: config, logger, metrics, httpx)
+            ├── services/booking.py (4 deps: config, logger, metrics, httpx)
+            │       ↑
+            └── services/horario_reuniones.py (3 deps: config, logger, httpx)
                     ↑
-                    └── tools.py (6 deps: schedule_validator, booking, validation, logger, metrics, langchain)
+                    └── tool/tools.py (6 deps: services/*, validation, logger, metrics, langchain)
                             ↑
-                            └── prompts/__init__.py (1 dep: jinja2)
+                            └── prompts/__init__.py (2 deps: jinja2, services/horario_reuniones)
                                     ↑ (usa citas_system.j2)
-                                    └── agent.py (9 deps: config, models, tools, logger, metrics, prompts, langchain)
+                                    └── agent/agent.py (9 deps: config, models, tools, logger, metrics, prompts, langchain)
                                             ↑
                                             └── main.py (7 deps: config, agent, logger, metrics, fastmcp)
                                                     ↑
@@ -1972,14 +2010,14 @@ config.py (0 dependencias internas)
 ```
 
 **Niveles de dependencia:**
-- Nivel 0: config.py
-- Nivel 1: logger.py, metrics.py, models.py
-- Nivel 2: validation.py, schedule_validator.py, booking.py
-- Nivel 3: tools.py, prompts/__init__.py
-- Nivel 4: agent.py
+- Nivel 0: config/config.py
+- Nivel 1: logger.py, metrics.py, config/models.py
+- Nivel 2: validation.py, services/schedule_validator.py, services/booking.py, services/horario_reuniones.py
+- Nivel 3: tool/tools.py, prompts/__init__.py
+- Nivel 4: agent/agent.py
 - Nivel 5: main.py
 
-**Total de archivos:** 13 (sin contar __init__.py vacíos)
+**Total de archivos:** 14+ (sin contar __init__.py vacíos)
 
 ---
 
@@ -2001,4 +2039,4 @@ El flujo de datos es claro y la separación de responsabilidades permite manteni
 ---
 
 **Versión:** 2.0.0
-**Última actualización:** 2026-01-28
+**Última actualización:** 2026-02-03

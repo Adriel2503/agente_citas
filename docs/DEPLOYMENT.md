@@ -39,14 +39,21 @@ El servidor estará disponible en `http://localhost:8003`
 # .env
 OPENAI_API_KEY=sk-...
 OPENAI_MODEL=gpt-4o-mini
+OPENAI_TEMPERATURE=0.5
+OPENAI_TIMEOUT=90
+MAX_TOKENS=2048
 SERVER_HOST=0.0.0.0
 SERVER_PORT=8003
 LOG_LEVEL=DEBUG
 LOG_FILE=
 API_TIMEOUT=10
-OPENAI_TIMEOUT=90
-MAX_TOKENS=2048
 SCHEDULE_CACHE_TTL_MINUTES=5
+TIMEZONE=America/Lima
+
+# APIs MaravIA
+API_CALENDAR_URL=https://api.maravia.pe/servicio/n8n/ws_calendario.php
+API_AGENDAR_REUNION_URL=https://api.maravia.pe/servicio/n8n/ws_agendar_reunion.php
+API_INFORMACION_URL=https://api.maravia.pe/servicio/ws_informacion_ia.php
 ```
 
 ### Production
@@ -55,14 +62,21 @@ SCHEDULE_CACHE_TTL_MINUTES=5
 # .env.production
 OPENAI_API_KEY=sk-...
 OPENAI_MODEL=gpt-4o-mini     # o gpt-4o para mejor calidad
+OPENAI_TEMPERATURE=0.5
+OPENAI_TIMEOUT=90
+MAX_TOKENS=2048
 SERVER_HOST=0.0.0.0
 SERVER_PORT=8003
 LOG_LEVEL=WARNING            # Solo warnings y errores
 LOG_FILE=logs/agent.log      # Guardar logs en archivo
 API_TIMEOUT=10
-OPENAI_TIMEOUT=90
-MAX_TOKENS=2048
 SCHEDULE_CACHE_TTL_MINUTES=10  # Cache más largo en producción
+TIMEZONE=America/Lima
+
+# APIs MaravIA
+API_CALENDAR_URL=https://api.maravia.pe/servicio/n8n/ws_calendario.php
+API_AGENDAR_REUNION_URL=https://api.maravia.pe/servicio/n8n/ws_agendar_reunion.php
+API_INFORMACION_URL=https://api.maravia.pe/servicio/ws_informacion_ia.php
 ```
 
 ---
@@ -268,13 +282,13 @@ Esto permitirá:
 ### Ver variables de entorno
 
 ```bash
-python -c "from citas import config; import pprint; pprint.pprint({k:v for k,v in vars(config).items() if k.isupper()})"
+python -c "from citas.config import config; import pprint; pprint.pprint({k:v for k,v in vars(config).items() if k.isupper()})"
 ```
 
 ### Limpiar cache manualmente
 
 ```python
-from citas.schedule_validator import _clear_cache
+from citas.services.schedule_validator import _clear_cache
 _clear_cache()
 ```
 

@@ -67,14 +67,19 @@ El servidor estará disponible en `http://localhost:8003`
 |----------|-----------|---------|-------------|
 | `OPENAI_API_KEY` | ✅ Sí | - | API Key de OpenAI |
 | `OPENAI_MODEL` | ❌ No | `gpt-4o-mini` | Modelo de OpenAI a usar |
+| `OPENAI_TEMPERATURE` | ❌ No | `0.5` | Temperatura del modelo |
+| `OPENAI_TIMEOUT` | ❌ No | `90` | Timeout para llamadas a OpenAI (segundos) |
+| `MAX_TOKENS` | ❌ No | `2048` | Máximo de tokens por respuesta |
 | `SERVER_HOST` | ❌ No | `0.0.0.0` | Host del servidor |
 | `SERVER_PORT` | ❌ No | `8003` | Puerto del servidor |
 | `LOG_LEVEL` | ❌ No | `INFO` | Nivel de logging (DEBUG\|INFO\|WARNING\|ERROR) |
 | `LOG_FILE` | ❌ No | `""` | Archivo de log (vacío = solo stdout) |
-| `OPENAI_TIMEOUT` | ❌ No | `90` | Timeout para llamadas a OpenAI (segundos) |
 | `API_TIMEOUT` | ❌ No | `10` | Timeout para APIs externas (segundos) |
-| `MAX_TOKENS` | ❌ No | `2048` | Máximo de tokens por respuesta |
 | `SCHEDULE_CACHE_TTL_MINUTES` | ❌ No | `5` | Duración del cache de horarios (minutos) |
+| `TIMEZONE` | ❌ No | `America/Lima` | Zona horaria para fechas |
+| `API_CALENDAR_URL` | ❌ No | `https://api.maravia.pe/.../ws_calendario.php` | URL API calendario |
+| `API_AGENDAR_REUNION_URL` | ❌ No | `https://api.maravia.pe/.../ws_agendar_reunion.php` | URL API disponibilidad |
+| `API_INFORMACION_URL` | ❌ No | `https://api.maravia.pe/.../ws_informacion_ia.php` | URL API información |
 
 ## Uso Básico
 
@@ -84,11 +89,17 @@ El agente se comunica mediante el protocolo MCP (Model Context Protocol). Expone
 
 **Parámetros:**
 - `message` (string): Mensaje del usuario
-- `session_id` (string): ID único de sesión para memoria
+- `session_id` (string): ID único de sesión para memoria (usado como `id_prospecto`)
 - `context` (object): Configuración del agente
   - `context.config.id_empresa` (int, **requerido**): ID de la empresa
   - `context.config.personalidad` (string, opcional): Personalidad del agente
-  - Otros parámetros opcionales (ver [API.md](docs/API.md))
+  - `context.config.duracion_cita_minutos` (int, opcional): Duración de cita (default: 60)
+  - `context.config.slots` (int, opcional): Slots disponibles (default: 60)
+  - `context.config.agendar_usuario` (int, opcional): Flag 1/0 (default: 1)
+  - `context.config.id_usuario` (int, opcional): ID del vendedor/usuario
+  - `context.config.correo_usuario` (string, opcional): Email del vendedor
+  - `context.config.agendar_sucursal` (int, opcional): Flag 0/1 (default: 0)
+  - Ver todos los parámetros en [API.md](docs/API.md)
 
 **Ejemplo de request:**
 ```json
@@ -139,18 +150,26 @@ Incluye:
 ## Arquitectura
 
 ```
-ORQUESTADOR → MCP (HTTP) → Agent Citas
+ORQUESTADOR → MCP (HTTP) → Agent Citas (Puerto 8003)
                                 ↓
-                         LangChain Agent
+                         LangChain Agent (GPT-4o-mini)
                                 ↓
                     ┌───────────┴───────────┐
                     ↓                       ↓
             check_availability      create_booking
                     ↓                       ↓
-            (Valida horarios)      (Crea evento/cita)
-                    ↓                       ↓
-                [APIs MaravIA]        [APIs MaravIA]
+          ScheduleValidator         3 capas validación:
+                    ↓               1. Pydantic
+         ws_informacion_ia.php      2. ScheduleValidator
+         (OBTENER_HORARIO)          3. ws_calendario.php
+                                       (CREAR_EVENTO)
 ```
+
+**Flujo de datos:**
+1. Orquestador envía `message`, `session_id`, `context` (con `id_empresa`)
+2. Agent procesa con LangChain y memoria automática
+3. LLM decide qué tool usar según la conversación
+4. `create_booking` valida → crea evento en `ws_calendario.php`
 
 Ver [ARCHITECTURE.md](docs/ARCHITECTURE.md) para detalles completos.
 
@@ -160,19 +179,39 @@ Ver [ARCHITECTURE.md](docs/ARCHITECTURE.md) para detalles completos.
 
 ```
 agent_citas/
-├── src/citas/              # Código fuente
-│   ├── main.py            # Servidor MCP
-│   ├── agent.py           # Lógica del agente LangChain
-│   ├── tools.py           # Herramientas internas
-│   ├── schedule_validator.py  # Validación de horarios
-│   ├── booking.py         # Creación de eventos/citas
-│   ├── validation.py      # Validadores Pydantic
-│   ├── logger.py          # Sistema de logging
-│   ├── metrics.py         # Métricas Prometheus
-│   └── prompts/           # Templates de prompts
-├── docs/                  # Documentación
-├── .env.example           # Ejemplo de configuración
-└── requirements.txt       # Dependencias
+├── src/citas/                    # Código fuente
+│   ├── main.py                   # Servidor MCP (punto de entrada)
+│   ├── logger.py                 # Sistema de logging centralizado
+│   ├── metrics.py                # Métricas Prometheus
+│   ├── validation.py             # Validadores Pydantic
+│   ├── __init__.py               # Exports y metadata
+│   │
+│   ├── agent/                    # Lógica del agente
+│   │   ├── agent.py              # Agente LangChain con memoria
+│   │   └── __init__.py
+│   │
+│   ├── tool/                     # Herramientas del LLM
+│   │   ├── tools.py              # check_availability, create_booking
+│   │   └── __init__.py
+│   │
+│   ├── services/                 # Servicios de negocio
+│   │   ├── schedule_validator.py # Validación de horarios con cache
+│   │   ├── booking.py            # Creación de eventos (ws_calendario)
+│   │   ├── horario_reuniones.py  # Obtención de horarios para prompt
+│   │   └── __init__.py
+│   │
+│   ├── config/                   # Configuración
+│   │   ├── config.py             # Variables de entorno
+│   │   ├── models.py             # Modelos Pydantic (CitaConfig)
+│   │   └── __init__.py
+│   │
+│   └── prompts/                  # Templates de prompts
+│       ├── __init__.py           # Builder de system prompt
+│       └── citas_system.j2       # Template Jinja2
+│
+├── docs/                         # Documentación
+├── .env.example                  # Ejemplo de configuración
+└── requirements.txt              # Dependencias
 ```
 
 ### Ejecutar en modo DEBUG

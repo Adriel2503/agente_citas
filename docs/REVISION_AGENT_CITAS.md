@@ -1,8 +1,29 @@
 # Revisión del Agente de Citas (agent_citas)
 
+**Última actualización:** 2026-02-03
+
 ## Resumen
 
-El agente está bien estructurado, alineado con ws_calendario (CREAR_EVENTO) y con el flujo MaravIA (orquestador → agente citas → tools → API). Se revisaron: agent.py, booking.py, tools.py, validation.py, schedule_validator.py, prompts, horario_reuniones, config, main.py, models.
+El agente está bien estructurado, alineado con ws_calendario (CREAR_EVENTO) y con el flujo MaravIA (orquestador → agente citas → tools → API).
+
+**Estructura de directorios:**
+```
+src/citas/
+├── agent/agent.py           # Lógica LangChain
+├── tool/tools.py            # check_availability, create_booking
+├── services/
+│   ├── schedule_validator.py
+│   ├── booking.py           # CREAR_EVENTO → ws_calendario.php
+│   └── horario_reuniones.py
+├── config/
+│   ├── config.py
+│   └── models.py
+├── prompts/
+├── validation.py
+├── logger.py
+├── metrics.py
+└── main.py
+```
 
 ---
 
@@ -40,12 +61,30 @@ El agente está bien estructurado, alineado con ws_calendario (CREAR_EVENTO) y c
 
 | Archivo | Rol |
 |--------|-----|
-| agent.py | AgentContext, _prepare_agent_context, process_cita_message |
-| booking.py | confirm_booking, payload CREAR_EVENTO, _build_fecha_inicio_fin |
-| tools.py | check_availability, create_booking, uso de ctx |
-| prompts/citas_system.j2 | Instrucciones, flujo de captura (citas/reuniones) |
-| prompts/__init__.py | build_citas_system_prompt, fecha Perú, fetch_horario_reuniones |
-| schedule_validator.py | Horarios, validate, recommendation (SUGERIR_HORARIOS), es_cita |
-| horario_reuniones.py | fetch_horario_reuniones para system prompt |
-| validation.py | validate_booking_data, ContactInfo, BookingDateTime |
-| main.py | MCP tool chat, process_cita_message |
+| `agent/agent.py` | AgentContext, _prepare_agent_context, process_cita_message |
+| `services/booking.py` | confirm_booking, payload CREAR_EVENTO → ws_calendario.php |
+| `tool/tools.py` | check_availability, create_booking, uso de runtime context |
+| `prompts/citas_system.j2` | Instrucciones, flujo de captura (motivo, fecha, hora, nombre, email) |
+| `prompts/__init__.py` | build_citas_system_prompt, fecha Perú, fetch_horario_reuniones |
+| `services/schedule_validator.py` | Cache TTL, validate, recommendation (SUGERIR_HORARIOS), es_cita |
+| `services/horario_reuniones.py` | fetch_horario_reuniones para system prompt |
+| `validation.py` | validate_booking_data, ContactInfo, BookingDateTime |
+| `config/config.py` | Variables de entorno, URLs de APIs |
+| `config/models.py` | CitaConfig (Pydantic) |
+| `main.py` | MCP tool chat, punto de entrada |
+
+## AgentContext (campos actuales)
+
+```python
+@dataclass
+class AgentContext:
+    id_empresa: int              # REQUERIDO
+    duracion_cita_minutos: int = 60
+    slots: int = 60
+    agendar_usuario: int = 1
+    id_usuario: int = 1
+    correo_usuario: str = ""
+    agendar_sucursal: int = 0
+    id_prospecto: str = ""       # = session_id
+    session_id: str = ""
+```
