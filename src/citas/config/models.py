@@ -10,7 +10,7 @@ class ChatRequest(BaseModel):
     """Request para el endpoint de chat."""
     
     message: str = Field(..., description="Mensaje del cliente")
-    session_id: str = Field(..., description="ID de sesión único para la conversación")
+    session_id: int = Field(..., description="ID de sesión (int, unificado con orquestador)")
     context: Dict[str, Any] = Field(
         default_factory=dict,
         description="Contexto adicional (configuración del bot, etc.)"
@@ -21,7 +21,7 @@ class ChatResponse(BaseModel):
     """Response del endpoint de chat."""
     
     reply: str = Field(..., description="Respuesta del agente")
-    session_id: str = Field(..., description="ID de sesión")
+    session_id: int = Field(..., description="ID de sesión (int, unificado con orquestador)")
     metadata: Optional[Dict[str, Any]] = Field(
         default=None,
         description="Metadata adicional (intent detectado, acción realizada, etc.)"

@@ -142,7 +142,7 @@ async def create_booking(
     slots = ctx.slots if ctx else 60
     agendar_usuario = ctx.agendar_usuario if ctx else 1  # bandera agendar_usuario para ScheduleValidator
     agendar_sucursal = ctx.agendar_sucursal if ctx else 0
-    id_prospecto = ctx.id_prospecto if ctx else ""
+    id_prospecto = ctx.id_prospecto if ctx else 0
     id_usuario = getattr(ctx, "id_usuario", 1) if ctx else 1
     correo_usuario = getattr(ctx, "correo_usuario", "") or ""
 
@@ -182,7 +182,7 @@ async def create_booking(
 
             # 3. Crear evento en ws_calendario (CREAR_EVENTO)
             logger.debug("[TOOL] create_booking - Creando evento en API")
-            id_prospecto_val = id_prospecto or (str(ctx.session_id) if ctx else "")
+            id_prospecto_val = id_prospecto if (id_prospecto and id_prospecto > 0) else (ctx.session_id if ctx else 0)
             booking_result = await confirm_booking(
                 id_usuario=id_usuario,
                 id_prospecto=id_prospecto_val,

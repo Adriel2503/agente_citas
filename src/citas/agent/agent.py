@@ -43,8 +43,8 @@ class AgentContext:
     id_usuario: int = 1  # ID real del usuario/vendedor (para CREAR_EVENTO)
     correo_usuario: str = ""  # email del usuario/vendedor (desde orquestador)
     agendar_sucursal: int = 0
-    id_prospecto: str = ""
-    session_id: str = ""
+    id_prospecto: int = 0  # mismo que session_id del orquestador
+    session_id: int = 0
 
 
 def _validate_context(context: Dict[str, Any]) -> None:
@@ -111,7 +111,7 @@ def _get_agent(config: Dict[str, Any]):
     return agent
 
 
-def _prepare_agent_context(context: Dict[str, Any], session_id: str) -> AgentContext:
+def _prepare_agent_context(context: Dict[str, Any], session_id: int) -> AgentContext:
     """
     Prepara el contexto runtime para inyectar a las tools del agente.
     
@@ -120,7 +120,7 @@ def _prepare_agent_context(context: Dict[str, Any], session_id: str) -> AgentCon
     
     Args:
         context: Contexto del orquestador
-        session_id: ID de sesión
+        session_id: ID de sesión (int, unificado con orquestador)
     
     Returns:
         AgentContext configurado
@@ -130,7 +130,8 @@ def _prepare_agent_context(context: Dict[str, Any], session_id: str) -> AgentCon
     # id_empresa ya está validado, usar directamente
     context_params = {
         "id_empresa": config_data["id_empresa"],
-        "session_id": session_id
+        "session_id": session_id,
+        "id_prospecto": session_id,
     }
     
     # Solo agregar valores que vienen del orquestador (si existen)
@@ -164,15 +165,12 @@ def _prepare_agent_context(context: Dict[str, Any], session_id: str) -> AgentCon
         elif isinstance(agendar_sucursal, int):
             context_params["agendar_sucursal"] = agendar_sucursal
 
-    # id_prospecto: solo session_id (el orquestador ya no envía id_prospecto en config)
-    context_params["id_prospecto"] = str(session_id)
-
     return AgentContext(**context_params)
 
 
 async def process_cita_message(
     message: str,
-    session_id: str,
+    session_id: int,
     context: Dict[str, Any]
 ) -> str:
     """
@@ -186,7 +184,7 @@ async def process_cita_message(
     
     Args:
         message: Mensaje del cliente
-        session_id: ID de sesión para tracking y memoria
+        session_id: ID de sesión (int, unificado con orquestador)
         context: Contexto adicional (config del bot, id_empresa, etc.)
     
     Returns:
@@ -196,11 +194,11 @@ async def process_cita_message(
     if not message or not message.strip():
         return "No recibí tu mensaje. ¿Podrías repetirlo?"
     
-    if not session_id:
-        raise ValueError("session_id es requerido")
+    if session_id is None or session_id < 0:
+        raise ValueError("session_id es requerido (entero no negativo)")
     
-    # Registrar request
-    chat_requests_total.labels(session_id=session_id).inc()
+    # Registrar request (Prometheus labels requieren str)
+    chat_requests_total.labels(session_id=str(session_id)).inc()
     
     # Validar contexto
     try:
@@ -225,9 +223,10 @@ async def process_cita_message(
     
     agent_context = _prepare_agent_context(context, session_id)
     
+    # LangGraph checkpointer usa thread_id como str
     config = {
         "configurable": {
-            "thread_id": session_id
+            "thread_id": str(session_id)
         }
     }
     try:

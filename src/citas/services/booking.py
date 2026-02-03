@@ -52,7 +52,7 @@ def _build_fecha_inicio_fin(fecha: str, hora: str, duracion_minutos: int) -> tup
 
 async def confirm_booking(
     id_usuario: int,
-    id_prospecto: str,
+    id_prospecto: int,
     nombre_completo: str,
     correo_cliente: str,
     fecha: str,
@@ -67,7 +67,7 @@ async def confirm_booking(
 
     Args:
         id_usuario: ID del usuario (vendedor) que registra la cita
-        id_prospecto: ID del prospecto/cliente
+        id_prospecto: ID del prospecto/cliente (int, mismo que session_id del orquestador)
         nombre_completo: Nombre completo del cliente
         correo_cliente: Email del cliente (correo_cliente en API)
         fecha: Fecha en formato YYYY-MM-DD
