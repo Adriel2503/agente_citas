@@ -61,6 +61,7 @@ async def confirm_booking(
     agendar_usuario: int,
     duracion_cita_minutos: int = 60,
     correo_usuario: str = "",
+    log_create_booking_apis: bool = False,
 ) -> Dict[str, Any]:
     """
     Crea un evento en el calendario (ws_calendario.php, CREAR_EVENTO).
@@ -108,6 +109,10 @@ async def confirm_booking(
             "agendar_usuario": agendar_usuario,
         }
 
+        if log_create_booking_apis:
+            logger.info("[create_booking] API 3: ws_calendario.php - CREAR_EVENTO")
+            logger.info("  URL: %s", app_config.API_CALENDAR_URL)
+            logger.info("  Enviado: %s", json.dumps(payload, ensure_ascii=False))
         logger.debug(f"[BOOKING] Creando evento: {servicio} - {fecha} {hora} - {nombre_completo}")
         logger.debug(f"[BOOKING] Payload: {payload}")
         logger.debug("[BOOKING] JSON enviado a ws_calendario.php (CREAR_EVENTO): %s", json.dumps(payload, ensure_ascii=False, indent=2))
@@ -122,6 +127,8 @@ async def confirm_booking(
                 response.raise_for_status()
                 data = response.json()
 
+        if log_create_booking_apis:
+            logger.info("  Respuesta: %s", json.dumps(data, ensure_ascii=False))
         logger.debug(f"[BOOKING] Respuesta API: {data}")
 
         if data.get("success"):

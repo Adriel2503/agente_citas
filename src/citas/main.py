@@ -132,6 +132,7 @@ if __name__ == "__main__":
     logger.info("Tools internas del agente:")
     logger.info("- check_availability (consulta horarios)")
     logger.info("- create_booking (crea citas/eventos)")
+    logger.info("- search_productos_servicios (busca productos/servicios)")
     logger.info("-" * 60)
     logger.info("Métricas disponibles en /metrics (Prometheus)")
     logger.info("=" * 60)

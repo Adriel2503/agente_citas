@@ -51,8 +51,8 @@ SCHEDULE_CACHE_TTL_MINUTES=5
 TIMEZONE=America/Lima
 
 # APIs MaravIA
-API_CALENDAR_URL=https://api.maravia.pe/servicio/n8n/ws_calendario.php
-API_AGENDAR_REUNION_URL=https://api.maravia.pe/servicio/n8n/ws_agendar_reunion.php
+API_CALENDAR_URL=https://api.maravia.pe/servicio/ws_calendario.php
+API_AGENDAR_REUNION_URL=https://api.maravia.pe/servicio/ws_agendar_reunion.php
 API_INFORMACION_URL=https://api.maravia.pe/servicio/ws_informacion_ia.php
 ```
 
@@ -74,8 +74,8 @@ SCHEDULE_CACHE_TTL_MINUTES=10  # Cache más largo en producción
 TIMEZONE=America/Lima
 
 # APIs MaravIA
-API_CALENDAR_URL=https://api.maravia.pe/servicio/n8n/ws_calendario.php
-API_AGENDAR_REUNION_URL=https://api.maravia.pe/servicio/n8n/ws_agendar_reunion.php
+API_CALENDAR_URL=https://api.maravia.pe/servicio/ws_calendario.php
+API_AGENDAR_REUNION_URL=https://api.maravia.pe/servicio/ws_agendar_reunion.php
 API_INFORMACION_URL=https://api.maravia.pe/servicio/ws_informacion_ia.php
 ```
 

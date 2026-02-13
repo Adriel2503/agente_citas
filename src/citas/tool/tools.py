@@ -12,12 +12,14 @@ from langchain.tools import tool, ToolRuntime
 try:
     from ..services.schedule_validator import ScheduleValidator
     from ..services.booking import confirm_booking
+    from ..services.busqueda_productos import buscar_productos_servicios, format_productos_para_respuesta
     from ..logger import get_logger
     from ..metrics import track_tool_execution
     from ..validation import validate_booking_data
 except ImportError:
     from citas.services.schedule_validator import ScheduleValidator
     from citas.services.booking import confirm_booking
+    from citas.services.busqueda_productos import buscar_productos_servicios, format_productos_para_respuesta
     from citas.logger import get_logger
     from citas.metrics import track_tool_execution
     from citas.validation import validate_booking_data
@@ -115,7 +117,7 @@ async def create_booking(
     - Nombre completo del cliente, Email del cliente (customer_contact)
 
     La herramienta validará el horario y creará el evento en ws_calendario (CREAR_EVENTO).
-    La respuesta puede incluir enlace de videollamada (Google Meet) o mensaje de cita reservada.
+    La respuesta puede incluir enlace de videollamada (Google Meet) o mensaje de cita confirmada.
 
     Args:
         service: Motivo de la reunión o servicio (ej: "demostración", "consulta", "reunión de ventas")
@@ -127,13 +129,14 @@ async def create_booking(
 
     Returns:
         Mensaje de confirmación, detalles (servicio, fecha, hora, nombre) y, si aplica,
-        enlace de videollamada o aviso de "cita ya reservada"; o mensaje de error
+        enlace de videollamada o aviso de "cita confirmada"; o mensaje de error
 
     Examples:
         >>> await create_booking("demostración", "2026-01-27", "02:00 PM", "Juan Pérez", "cliente@ejemplo.com")
         "Evento agregado correctamente. Detalles: ... La reunión será por videollamada. Enlace: https://meet.google.com/..."
     """
     logger.debug(f"[TOOL] create_booking - {service} | {date} {time} | {customer_name}")
+    logger.info("[create_booking] Tool en uso: create_booking")
 
     # Obtener configuración del runtime context
     ctx = runtime.context if runtime else None
@@ -170,7 +173,8 @@ async def create_booking(
                 slots=slots,
                 es_cita=True,
                 agendar_usuario=agendar_usuario,
-                agendar_sucursal=agendar_sucursal
+                agendar_sucursal=agendar_sucursal,
+                log_create_booking_apis=True,
             )
 
             validation = await validator.validate(date, time)
@@ -194,6 +198,7 @@ async def create_booking(
                 agendar_usuario=agendar_usuario,
                 duracion_cita_minutos=duracion_cita_minutos,
                 correo_usuario=correo_usuario,
+                log_create_booking_apis=True,
             )
             
             logger.debug(f"[TOOL] create_booking - Resultado: {booking_result}")
@@ -214,7 +219,7 @@ async def create_booking(
                 if booking_result.get("google_meet_link"):
                     lines.append(f"La reunión será por videollamada. Enlace: {booking_result['google_meet_link']}")
                 elif booking_result.get("google_calendar_synced") is False:
-                    lines.append("Tu cita ya está reservada. No se pudo generar el enlace de videollamada; te contactaremos con los detalles.")
+                    lines.append("Tu cita está confirmada. No se pudo generar el enlace de videollamada; te contactaremos con los detalles.")
                 lines.append("")
                 lines.append("¡Te esperamos!")
                 return "\n".join(lines)
@@ -228,10 +233,61 @@ async def create_booking(
         return f"Error inesperado al crear la cita: {str(e)}\n\nPor favor intenta nuevamente."
 
 
+@tool
+async def search_productos_servicios(
+    busqueda: str,
+    limite: int = 10,
+    runtime: ToolRuntime = None
+) -> str:
+    """
+    Busca productos y servicios del catálogo por nombre o descripción.
+    Úsala cuando el cliente pregunte por algo específico: precios, descripción,
+    detalles de un producto o servicio concreto.
+
+    Args:
+        busqueda: Término de búsqueda (ej: "NovaX", "demostración", "consultoría")
+        limite: Cantidad máxima de resultados (opcional, default 10)
+        runtime: Contexto automático (inyectado por LangChain)
+
+    Returns:
+        Texto con los productos/servicios encontrados (precio, categoría, descripción)
+    """
+    logger.debug(f"[TOOL] search_productos_servicios - busqueda: {busqueda}, limite: {limite}")
+    logger.info("[search_productos_servicios] Tool en uso: search_productos_servicios")
+
+    ctx = runtime.context if runtime else None
+    id_empresa = ctx.id_empresa if ctx else 1
+
+    try:
+        with track_tool_execution("search_productos_servicios"):
+            result = await buscar_productos_servicios(
+                id_empresa=id_empresa,
+                busqueda=busqueda,
+                limite=limite,
+                log_search_apis=True,
+            )
+
+            if not result["success"]:
+                return result.get("error", "No se pudo completar la búsqueda.")
+
+            productos = result.get("productos", [])
+            if not productos:
+                return f"No encontré productos o servicios que coincidan con '{busqueda}'. Prueba con otros términos."
+
+            lineas = [f"Encontré {len(productos)} resultado(s) para '{busqueda}':\n"]
+            lineas.append(format_productos_para_respuesta(productos))
+            return "\n".join(lineas)
+
+    except Exception as e:
+        logger.error(f"[TOOL] search_productos_servicios - Error: {e}", exc_info=True)
+        return f"Error al buscar: {str(e)}. Intenta de nuevo."
+
+
 # Lista de todas las tools disponibles para el agente
 AGENT_TOOLS = [
     check_availability,
-    create_booking
+    create_booking,
+    search_productos_servicios,
 ]
 
-__all__ = ["check_availability", "create_booking", "AGENT_TOOLS"]
+__all__ = ["check_availability", "create_booking", "search_productos_servicios", "AGENT_TOOLS"]

@@ -151,11 +151,11 @@ El **Agent Citas** es un microservicio de IA conversacional que automatiza la ge
 │  │  1. ws_informacion_ia.php                          │   │
 │  │     OBTENER_HORARIO_REUNIONES                      │   │
 │  │                                                    │   │
-│  │  2. n8n/ws_agendar_reunion.php                     │   │
+│  │  2. ws_agendar_reunion.php                     │   │
 │  │     CONSULTAR_DISPONIBILIDAD                       │   │
 │  │     SUGERIR_HORARIOS                               │   │
 │  │                                                    │   │
-│  │  3. n8n/ws_calendario.php                          │   │
+│  │  3. ws_calendario.php                          │   │
 │  │     CREAR_EVENTO (usado por booking.py)            │   │
 │  └────────────────────────────────────────────────────┘   │
 │                                                           │
@@ -510,7 +510,7 @@ Guarda este código para futuras consultas. ¡Te esperamos!
 **Constantes:**
 
 ```python
-AGENDAR_REUNIONES_ENDPOINT = "https://api.maravia.pe/servicio/n8n/ws_agendar_reunion.php"
+AGENDAR_REUNIONES_ENDPOINT = "https://api.maravia.pe/servicio/ws_agendar_reunion.php"
 INFORMATION_ENDPOINT = "https://api.maravia.pe/servicio/ws_informacion_ia.php"
 
 DAY_MAPPING = {
@@ -700,7 +700,7 @@ return {"valid": True, "error": None}
 - **Propósito**: Verificar disponibilidad contra citas existentes
 - **API Call**:
   ```python
-  POST https://api.maravia.pe/servicio/n8n/ws_agendar_reunion.php
+  POST https://api.maravia.pe/servicio/ws_agendar_reunion.php
   Payload: {
       "codOpe": "CONSULTAR_DISPONIBILIDAD",
       "id_empresa": 123,
@@ -759,7 +759,7 @@ return {"valid": True, "error": None}
 
 **Constante:**
 ```python
-CALENDAR_ENDPOINT = "https://api.maravia.pe/servicio/n8n/ws_calendario.php"
+CALENDAR_ENDPOINT = "https://api.maravia.pe/servicio/ws_calendario.php"
 ```
 
 **Función principal:**
@@ -1044,8 +1044,8 @@ SCHEDULE_CACHE_TTL_MINUTES = int(os.getenv("SCHEDULE_CACHE_TTL_MINUTES", "5"))
 TIMEZONE = os.getenv("TIMEZONE", "America/Lima")
 
 # APIs MaravIA
-API_CALENDAR_URL = os.getenv("API_CALENDAR_URL", "https://api.maravia.pe/servicio/n8n/ws_calendario.php")
-API_AGENDAR_REUNION_URL = os.getenv("API_AGENDAR_REUNION_URL", "https://api.maravia.pe/servicio/n8n/ws_agendar_reunion.php")
+API_CALENDAR_URL = os.getenv("API_CALENDAR_URL", "https://api.maravia.pe/servicio/ws_calendario.php")
+API_AGENDAR_REUNION_URL = os.getenv("API_AGENDAR_REUNION_URL", "https://api.maravia.pe/servicio/ws_agendar_reunion.php")
 API_INFORMACION_URL = os.getenv("API_INFORMACION_URL", "https://api.maravia.pe/servicio/ws_informacion_ia.php")
 ```
 
@@ -1661,7 +1661,7 @@ __all__ = [
               │           ├─ fecha_hora_inicio = 2026-01-29 14:00:00
               │           ├─ fecha_hora_fin = 2026-01-29 15:00:00
               │           │
-              │           ├─ POST https://api.maravia.pe/servicio/n8n/ws_agendar_reunion.php
+              │           ├─ POST https://api.maravia.pe/servicio/ws_agendar_reunion.php
               │           │  with track_api_call("consultar_disponibilidad"):
               │           │    Payload: {
               │           │      "codOpe": "CONSULTAR_DISPONIBILIDAD",
@@ -1701,7 +1701,7 @@ __all__ = [
               │      │    "id_usuario": 1
               │      │  }
               │      │
-              │      ├─ POST https://api.maravia.pe/servicio/n8n/ws_agendar_reunion.php
+              │      ├─ POST https://api.maravia.pe/servicio/ws_agendar_reunion.php
               │      │  with track_api_call("agendar_reunion"):
               │      │    Timeout: 10s
               │      │    Response: {

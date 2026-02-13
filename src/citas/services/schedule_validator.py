@@ -112,6 +112,7 @@ class ScheduleValidator:
         es_cita: bool = True,
         agendar_usuario: int = 0,
         agendar_sucursal: int = 0,
+        log_create_booking_apis: bool = False,
     ):
         self.id_empresa = id_empresa
         self.duracion_cita = timedelta(minutes=duracion_cita_minutos)
@@ -120,6 +121,7 @@ class ScheduleValidator:
         self.es_cita = es_cita
         self.agendar_usuario = agendar_usuario
         self.agendar_sucursal = agendar_sucursal
+        self.log_create_booking_apis = log_create_booking_apis
 
     async def _fetch_schedule(self) -> Optional[Dict]:
         """
@@ -139,6 +141,10 @@ class ScheduleValidator:
             "codOpe": "OBTENER_HORARIO_REUNIONES",
             "id_empresa": self.id_empresa
         }
+        if self.log_create_booking_apis:
+            logger.info("[create_booking] API 1: ws_informacion_ia.php - OBTENER_HORARIO_REUNIONES")
+            logger.info("  URL: %s", app_config.API_INFORMACION_URL)
+            logger.info("  Enviado: %s", json.dumps(payload_horario, ensure_ascii=False))
         logger.debug("[SCHEDULE] JSON enviado a ws_informacion_ia.php (OBTENER_HORARIO_REUNIONES): %s", json.dumps(payload_horario, ensure_ascii=False, indent=2))
         try:
             with track_api_call("obtener_horario"):
@@ -150,6 +156,9 @@ class ScheduleValidator:
                     )
                     response.raise_for_status()
                     data = response.json()
+
+            if self.log_create_booking_apis:
+                logger.info("  Respuesta: %s", json.dumps(data, ensure_ascii=False))
 
             if data.get("success") and data.get("horario_reuniones"):
                 schedule = data["horario_reuniones"]
@@ -300,6 +309,10 @@ class ScheduleValidator:
                 "agendar_sucursal": self.agendar_sucursal
             }
 
+            if self.log_create_booking_apis:
+                logger.info("[create_booking] API 2: ws_agendar_reunion.php - CONSULTAR_DISPONIBILIDAD")
+                logger.info("  URL: %s", app_config.API_AGENDAR_REUNION_URL)
+                logger.info("  Enviado: %s", json.dumps(payload, ensure_ascii=False))
             logger.debug(f"[AVAILABILITY] Consultando: {fecha_str} {hora_str}")
             logger.debug("[AVAILABILITY] JSON enviado a ws_agendar_reunion.php (CONSULTAR_DISPONIBILIDAD): %s", json.dumps(payload, ensure_ascii=False, indent=2))
 
@@ -313,6 +326,8 @@ class ScheduleValidator:
                     response.raise_for_status()
                     data = response.json()
 
+            if self.log_create_booking_apis:
+                logger.info("  Respuesta: %s", json.dumps(data, ensure_ascii=False))
             logger.debug(f"[AVAILABILITY] Disponible: {data.get('disponible')}")
 
             if not data.get("success"):

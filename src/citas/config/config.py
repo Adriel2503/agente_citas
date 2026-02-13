@@ -41,11 +41,11 @@ SCHEDULE_CACHE_TTL_MINUTES = int(os.getenv("SCHEDULE_CACHE_TTL_MINUTES", "5"))
 # APIs MaravIA (calendario, agendar reunión, información/horarios)
 API_CALENDAR_URL = os.getenv(
     "API_CALENDAR_URL",
-    "https://api.maravia.pe/servicio/n8n/ws_calendario.php",
+    "https://api.maravia.pe/servicio/ws_calendario.php",
 )
 API_AGENDAR_REUNION_URL = os.getenv(
     "API_AGENDAR_REUNION_URL",
-    "https://api.maravia.pe/servicio/n8n/ws_agendar_reunion.php",
+    "https://api.maravia.pe/servicio/ws_agendar_reunion.php",
 )
 API_INFORMACION_URL = os.getenv(
     "API_INFORMACION_URL",
