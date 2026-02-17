@@ -35,7 +35,7 @@ initialize_agent_info(model=app_config.OPENAI_MODEL, version="2.0.0")
 
 # Inicializar servidor MCP
 mcp = FastMCP(
-    name="Agente Citas - MaravIA",
+    name="Agente Citas",
     instructions="Agente especializado en gestión de citas y reuniones"
 )
 
@@ -63,7 +63,7 @@ async def chat(
         session_id: ID de sesión (int, unificado con orquestador)
         context: Contexto adicional requerido:
             - config.id_empresa (int, requerido): ID de la empresa
-            - config.id_usuario (int, opcional): ID del usuario/vendedor (para CREAR_EVENTO en ws_calendario)
+            - config.usuario_id (int, opcional): ID del usuario/vendedor (para CREAR_EVENTO en ws_calendario)
             - config.correo_usuario (str, opcional): Email del usuario/vendedor (para CREAR_EVENTO)
             - config.agendar_usuario (bool o int, opcional): 1=agendar por usuario, 0=no (default: 1)
             - config.agendar_sucursal (bool o int, opcional): 1=agendar por sucursal, 0=no (default: 0)

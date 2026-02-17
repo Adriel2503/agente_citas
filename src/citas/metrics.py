@@ -12,50 +12,50 @@ from typing import Optional
 
 # Conversaciones
 chat_requests_total = Counter(
-    'agent_reservas_chat_requests_total',
+    'agent_citas_chat_requests_total',
     'Total de mensajes recibidos por el agente',
     ['session_id']
 )
 
 chat_errors_total = Counter(
-    'agent_reservas_chat_errors_total',
+    'agent_citas_chat_errors_total',
     'Total de errores en el procesamiento de mensajes',
     ['error_type']
 )
 
 # Citas
 booking_attempts_total = Counter(
-    'agent_reservas_booking_attempts_total',
+    'agent_citas_booking_attempts_total',
     'Total de intentos de cita'
 )
 
 booking_success_total = Counter(
-    'agent_reservas_booking_success_total',
+    'agent_citas_booking_success_total',
     'Total de citas exitosas'
 )
 
 booking_failed_total = Counter(
-    'agent_reservas_booking_failed_total',
+    'agent_citas_booking_failed_total',
     'Total de citas fallidas',
     ['reason']
 )
 
 # Tools
 tool_calls_total = Counter(
-    'agent_reservas_tool_calls_total',
+    'agent_citas_tool_calls_total',
     'Total de llamadas a tools',
     ['tool_name']
 )
 
 tool_errors_total = Counter(
-    'agent_reservas_tool_errors_total',
+    'agent_citas_tool_errors_total',
     'Total de errores en tools',
     ['tool_name', 'error_type']
 )
 
 # API calls
 api_calls_total = Counter(
-    'agent_reservas_api_calls_total',
+    'agent_citas_api_calls_total',
     'Total de llamadas a APIs externas',
     ['endpoint', 'status']
 )
@@ -63,27 +63,27 @@ api_calls_total = Counter(
 # ========== HISTOGRAMAS (LATENCIA) ==========
 
 chat_response_duration_seconds = Histogram(
-    'agent_reservas_chat_response_duration_seconds',
+    'agent_citas_chat_response_duration_seconds',
     'Tiempo de respuesta del chat en segundos',
     buckets=(0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 90.0)
 )
 
 tool_execution_duration_seconds = Histogram(
-    'agent_reservas_tool_execution_duration_seconds',
+    'agent_citas_tool_execution_duration_seconds',
     'Tiempo de ejecución de tools en segundos',
     ['tool_name'],
     buckets=(0.1, 0.5, 1.0, 2.0, 5.0, 10.0)
 )
 
 api_call_duration_seconds = Histogram(
-    'agent_reservas_api_call_duration_seconds',
+    'agent_citas_api_call_duration_seconds',
     'Tiempo de llamadas a API en segundos',
     ['endpoint'],
     buckets=(0.1, 0.5, 1.0, 2.0, 5.0, 10.0)
 )
 
 llm_call_duration_seconds = Histogram(
-    'agent_reservas_llm_call_duration_seconds',
+    'agent_citas_llm_call_duration_seconds',
     'Tiempo de llamadas al LLM en segundos',
     buckets=(0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 30.0, 60.0, 90.0)
 )
@@ -91,7 +91,7 @@ llm_call_duration_seconds = Histogram(
 # ========== GAUGES (ESTADO ACTUAL) ==========
 
 cache_entries = Gauge(
-    'agent_reservas_cache_entries',
+    'agent_citas_cache_entries',
     'Número de entradas en cache',
     ['cache_type']
 )
@@ -99,7 +99,7 @@ cache_entries = Gauge(
 # ========== INFO ==========
 
 agent_info = Info(
-    'agent_reservas_info',
+    'agent_citas_info',
     'Información del agente de citas'
 )
 

@@ -40,7 +40,7 @@ class AgentContext:
     duracion_cita_minutos: int = 60
     slots: int = 60
     agendar_usuario: int = 1  # bandera agendar_usuario (1/0) para ScheduleValidator
-    id_usuario: int = 1  # ID real del usuario/vendedor (para CREAR_EVENTO)
+    usuario_id: int = 1  # ID real del usuario/vendedor (para CREAR_EVENTO)
     correo_usuario: str = ""  # email del usuario/vendedor (desde orquestador)
     agendar_sucursal: int = 0
     id_prospecto: int = 0  # mismo que session_id del orquestador
@@ -149,9 +149,9 @@ def _prepare_agent_context(context: Dict[str, Any], session_id: int) -> AgentCon
         elif isinstance(agendar_usuario, int):
             context_params["agendar_usuario"] = agendar_usuario
 
-    # id_usuario: ID real del usuario/vendedor (para CREAR_EVENTO en ws_calendario)
-    if "id_usuario" in config_data and config_data["id_usuario"] is not None:
-        context_params["id_usuario"] = int(config_data["id_usuario"])
+    # usuario_id: ID real del usuario/vendedor (para CREAR_EVENTO en ws_calendario)
+    if "usuario_id" in config_data and config_data["usuario_id"] is not None:
+        context_params["usuario_id"] = int(config_data["usuario_id"])
 
     # correo_usuario: email del vendedor (para CREAR_EVENTO)
     if "correo_usuario" in config_data and config_data["correo_usuario"] is not None:

@@ -1,6 +1,6 @@
 """
 Función para crear evento en el calendario (ws_calendario.php).
-Alineado con CREAR_EVENTO: id_usuario, id_prospecto, titulo, fecha_inicio, fecha_fin,
+Alineado con CREAR_EVENTO: usuario_id, id_prospecto, titulo, fecha_inicio, fecha_fin,
 correo_cliente, correo_usuario, agendar_usuario.
 """
 
@@ -51,7 +51,7 @@ def _build_fecha_inicio_fin(fecha: str, hora: str, duracion_minutos: int) -> tup
 
 
 async def confirm_booking(
-    id_usuario: int,
+    usuario_id: int,
     id_prospecto: int,
     nombre_completo: str,
     correo_cliente: str,
@@ -67,7 +67,7 @@ async def confirm_booking(
     Crea un evento en el calendario (ws_calendario.php, CREAR_EVENTO).
 
     Args:
-        id_usuario: ID del usuario (vendedor) que registra la cita
+        usuario_id: ID del usuario (vendedor) que registra la cita
         id_prospecto: ID del prospecto/cliente (int, mismo que session_id del orquestador)
         nombre_completo: Nombre completo del cliente
         correo_cliente: Email del cliente (correo_cliente en API)
@@ -99,7 +99,7 @@ async def confirm_booking(
 
         payload = {
             "codOpe": "CREAR_EVENTO",
-            "id_usuario": id_usuario,
+            "usuario_id": usuario_id,
             "id_prospecto": id_prospecto,
             "titulo": titulo,
             "fecha_inicio": fecha_inicio,

@@ -146,7 +146,7 @@ async def create_booking(
     agendar_usuario = ctx.agendar_usuario if ctx else 1  # bandera agendar_usuario para ScheduleValidator
     agendar_sucursal = ctx.agendar_sucursal if ctx else 0
     id_prospecto = ctx.id_prospecto if ctx else 0
-    id_usuario = getattr(ctx, "id_usuario", 1) if ctx else 1
+    usuario_id = getattr(ctx, "usuario_id", 1) if ctx else 1
     correo_usuario = getattr(ctx, "correo_usuario", "") or ""
 
     try:
@@ -188,7 +188,7 @@ async def create_booking(
             logger.debug("[TOOL] create_booking - Creando evento en API")
             id_prospecto_val = id_prospecto if (id_prospecto and id_prospecto > 0) else (ctx.session_id if ctx else 0)
             booking_result = await confirm_booking(
-                id_usuario=id_usuario,
+                usuario_id=usuario_id,
                 id_prospecto=id_prospecto_val,
                 nombre_completo=customer_name,
                 correo_cliente=customer_contact or "",
