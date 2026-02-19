@@ -95,7 +95,7 @@ OPENAI_TEMPERATURE: float = _get_float("OPENAI_TEMPERATURE", 0.5, min_val=0.0, m
 # ---------------------------------------------------------------------------
 
 SERVER_HOST: str = _get_str("SERVER_HOST", "0.0.0.0")
-SERVER_PORT: int = _get_int("SERVER_PORT", 8003, min_val=1, max_val=65535)
+SERVER_PORT: int = _get_int("SERVER_PORT", 8002, min_val=1, max_val=65535)
 
 # ---------------------------------------------------------------------------
 # Base de datos y Redis (futuro)
