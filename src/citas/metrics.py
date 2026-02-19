@@ -14,7 +14,7 @@ from typing import Optional
 chat_requests_total = Counter(
     'agent_citas_chat_requests_total',
     'Total de mensajes recibidos por el agente',
-    ['session_id']
+    ['empresa_id']
 )
 
 chat_errors_total = Counter(
@@ -111,7 +111,9 @@ def track_chat_response():
     start_time = time.time()
     try:
         yield
-    finally:
+    except BaseException:
+        raise
+    else:
         duration = time.time() - start_time
         chat_response_duration_seconds.observe(duration)
 
@@ -129,7 +131,7 @@ def track_tool_execution(tool_name: str):
             error_type=type(e).__name__
         ).inc()
         raise
-    finally:
+    else:
         duration = time.time() - start_time
         tool_execution_duration_seconds.labels(tool_name=tool_name).observe(duration)
 
@@ -145,9 +147,10 @@ def track_api_call(endpoint: str):
     except Exception as e:
         status = f"error_{type(e).__name__}"
         raise
-    finally:
+    else:
         duration = time.time() - start_time
         api_call_duration_seconds.labels(endpoint=endpoint).observe(duration)
+    finally:
         api_calls_total.labels(endpoint=endpoint, status=status).inc()
 
 
@@ -157,7 +160,9 @@ def track_llm_call():
     start_time = time.time()
     try:
         yield
-    finally:
+    except BaseException:
+        raise
+    else:
         duration = time.time() - start_time
         llm_call_duration_seconds.observe(duration)
 

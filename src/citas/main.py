@@ -5,7 +5,9 @@ Usa FastMCP para exponer herramientas según el protocolo MCP.
 Versión mejorada con logging, métricas y observabilidad.
 """
 
+import asyncio
 import logging
+from contextlib import asynccontextmanager
 from typing import Any, Dict
 from fastmcp import FastMCP
 from prometheus_client import make_asgi_app
@@ -15,11 +17,13 @@ try:
     from .agent import process_cita_message
     from .logger import setup_logging, get_logger
     from .metrics import initialize_agent_info
+    from .services.http_client import close_http_client
 except ImportError:
     from citas import config as app_config
     from citas.agent import process_cita_message
     from citas.logger import setup_logging, get_logger
     from citas.metrics import initialize_agent_info
+    from citas.services.http_client import close_http_client
 
 # Configurar logging antes de cualquier otra cosa
 log_level = getattr(logging, app_config.LOG_LEVEL.upper(), logging.INFO)
@@ -33,14 +37,24 @@ logger = get_logger(__name__)
 # Inicializar información del agente para métricas
 initialize_agent_info(model=app_config.OPENAI_MODEL, version="2.0.0")
 
+@asynccontextmanager
+async def app_lifespan(server=None):
+    """Lifespan del servidor: cierra el cliente HTTP compartido al apagar (compatible FastMCP v2)."""
+    try:
+        yield {}
+    finally:
+        await close_http_client()
+
+
 # Inicializar servidor MCP
 mcp = FastMCP(
     name="Agente Citas",
-    instructions="Agente especializado en gestión de citas y reuniones"
+    instructions="Agente especializado en gestión de citas y reuniones",
+    lifespan=app_lifespan,
 )
 
 
-@mcp.tool()
+@mcp.tool(name="cita_chat")
 async def chat(
     message: str,
     session_id: int,
@@ -82,34 +96,45 @@ async def chat(
         ...     }
         ... }
         >>> await chat("Quiero agendar una cita", 3671, context)
-        "¡Perfecto! ¿Para qué servicio deseas agendar?"
+        "¡Perfecto! ¿Para qué fecha y hora te gustaría la reunión?"
     """
     if context is None:
         context = {}
     
-    logger.info(f"[MCP] Mensaje recibido - Session: {session_id}, Length: {len(message)} chars")
-    logger.debug(f"[MCP] Message: {message[:100]}...")
-    logger.debug(f"[MCP] Context keys: {list(context.keys())}")
+    logger.info("[MCP] Mensaje recibido - Session: %s, Length: %s chars", session_id, len(message))
+    logger.debug("[MCP] Message: %s...", message[:100])
+    logger.debug("[MCP] Context keys: %s", list(context.keys()))
     
     try:
-        reply = await process_cita_message(
-            message=message,
-            session_id=session_id,
-            context=context
+        reply = await asyncio.wait_for(
+            process_cita_message(
+                message=message,
+                session_id=session_id,
+                context=context
+            ),
+            timeout=app_config.CHAT_TIMEOUT,
         )
-        
-        logger.info(f"[MCP] Respuesta generada - Length: {len(reply)} chars")
-        logger.debug(f"[MCP] Reply: {reply[:200]}...")
+
+        logger.info("[MCP] Respuesta generada - Length: %s chars", len(reply))
+        logger.debug("[MCP] Reply: %s...", reply[:200])
         return reply
-    
+
+    except asyncio.TimeoutError:
+        error_msg = f"La solicitud tardó más de {app_config.CHAT_TIMEOUT}s. Por favor, intenta de nuevo."
+        logger.error("[MCP] Timeout en process_cita_message (CHAT_TIMEOUT=%s)", app_config.CHAT_TIMEOUT)
+        return error_msg
+
     except ValueError as e:
         error_msg = f"Error de configuración: {str(e)}"
-        logger.error(f"[MCP] {error_msg}")
+        logger.error("[MCP] %s", error_msg)
         return error_msg
-    
+
+    except asyncio.CancelledError:
+        raise
+
     except Exception as e:
         error_msg = f"Error procesando mensaje: {str(e)}"
-        logger.error(f"[MCP] {error_msg}", exc_info=True)
+        logger.error("[MCP] %s", error_msg, exc_info=True)
         return error_msg
 
 
@@ -121,14 +146,14 @@ if __name__ == "__main__":
     logger.info("=" * 60)
     logger.info("INICIANDO AGENTE CITAS - MaravIA")
     logger.info("=" * 60)
-    logger.info(f"Host: {app_config.SERVER_HOST}:{app_config.SERVER_PORT}")
-    logger.info(f"Modelo: {app_config.OPENAI_MODEL}")
-    logger.info(f"Timeout LLM: {app_config.OPENAI_TIMEOUT}s")
-    logger.info(f"Timeout API: {app_config.API_TIMEOUT}s")
-    logger.info(f"Cache TTL: {app_config.SCHEDULE_CACHE_TTL_MINUTES} min")
-    logger.info(f"Log Level: {app_config.LOG_LEVEL}")
+    logger.info("Host: %s:%s", app_config.SERVER_HOST, app_config.SERVER_PORT)
+    logger.info("Modelo: %s", app_config.OPENAI_MODEL)
+    logger.info("Timeout LLM: %ss", app_config.OPENAI_TIMEOUT)
+    logger.info("Timeout API: %ss", app_config.API_TIMEOUT)
+    logger.info("Cache TTL: %s min", app_config.SCHEDULE_CACHE_TTL_MINUTES)
+    logger.info("Log Level: %s", app_config.LOG_LEVEL)
     logger.info("-" * 60)
-    logger.info("Tool expuesta al orquestador: chat")
+    logger.info("Tool expuesta al orquestador: cita_chat")
     logger.info("Tools internas del agente:")
     logger.info("- check_availability (consulta horarios)")
     logger.info("- create_booking (crea citas/eventos)")
@@ -147,5 +172,5 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         logger.info("\nServidor detenido por el usuario")
     except Exception as e:
-        logger.critical(f"Error crítico en el servidor: {e}", exc_info=True)
+        logger.critical("Error crítico en el servidor: %s", e, exc_info=True)
         raise

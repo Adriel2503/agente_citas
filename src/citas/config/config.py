@@ -9,9 +9,22 @@ from typing import Optional
 
 from dotenv import load_dotenv
 
-# .env en la raíz del proyecto agent_citas (src/citas/config/config.py -> agent_citas)
-_BASE_DIR: Path = Path(__file__).resolve().parent.parent.parent.parent
-load_dotenv(_BASE_DIR / ".env")
+
+def _find_env_path() -> Path:
+    """Busca .env hacia arriba desde el módulo actual hasta encontrarlo o llegar a la raíz."""
+    current = Path(__file__).resolve().parent
+    for _ in range(6):
+        env_file = current / ".env"
+        if env_file.exists():
+            return env_file
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+    return Path.cwd() / ".env"
+
+
+load_dotenv(_find_env_path())
 
 # ---------------------------------------------------------------------------
 # Helpers de lectura con validación
@@ -102,8 +115,9 @@ LOG_FILE: str = _get_str("LOG_FILE", "")  # Si está vacío, no guarda en archiv
 # Timeouts y límites
 # ---------------------------------------------------------------------------
 
-OPENAI_TIMEOUT: int = _get_int("OPENAI_TIMEOUT", 90, min_val=1, max_val=300)
+OPENAI_TIMEOUT: int = _get_int("OPENAI_TIMEOUT", 60, min_val=1, max_val=300)
 API_TIMEOUT: int = _get_int("API_TIMEOUT", 10, min_val=1, max_val=120)
+CHAT_TIMEOUT: int = _get_int("CHAT_TIMEOUT", 120, min_val=30, max_val=300)
 MAX_TOKENS: int = _get_int("MAX_TOKENS", 2048, min_val=1, max_val=128000)
 
 # ---------------------------------------------------------------------------

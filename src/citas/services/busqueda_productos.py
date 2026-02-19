@@ -5,17 +5,20 @@ Usa codOpe: BUSCAR_PRODUCTOS_SERVICIOS_CITAS
 
 import json
 import re
-import logging
 from typing import Any, Dict, List, Optional
 
 import httpx
 
 try:
     from .. import config as app_config
+    from ..logger import get_logger
+    from .http_client import get_client
 except ImportError:
     from citas import config as app_config
+    from citas.logger import get_logger
+    from citas.services.http_client import get_client
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def _clean_description(desc: Optional[str], max_chars: int = 120) -> str:
@@ -115,14 +118,10 @@ async def buscar_productos_servicios(
     )
 
     try:
-        async with httpx.AsyncClient(timeout=app_config.API_TIMEOUT) as client:
-            response = await client.post(
-                app_config.API_INFORMACION_URL,
-                json=payload,
-                headers={"Content-Type": "application/json", "Accept": "application/json"},
-            )
-            response.raise_for_status()
-            data = response.json()
+        client = get_client()
+        response = await client.post(app_config.API_INFORMACION_URL, json=payload)
+        response.raise_for_status()
+        data = response.json()
 
         if log_search_apis:
             logger.info("  Respuesta: %s", json.dumps(data, ensure_ascii=False))

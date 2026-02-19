@@ -4,23 +4,27 @@ Usa OBTENER_PRODUCTOS_CITAS y OBTENER_SERVICIOS_CITAS.
 Devuelve solo nombres (máx 10 de cada) para inyectar en el system prompt.
 """
 
-import logging
-from typing import Any, Dict, List, Optional, Tuple
+import asyncio
+from typing import Any, List, Optional, Tuple
 
-import requests
+import httpx
 
 try:
     from .. import config as app_config
+    from ..logger import get_logger
+    from .http_client import get_client
 except ImportError:
     from citas import config as app_config
+    from citas.logger import get_logger
+    from citas.services.http_client import get_client
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 _MAX_PRODUCTOS = 10
 _MAX_SERVICIOS = 10
 
 
-def _fetch_nombres(cod_ope: str, id_empresa: Any, max_items: int, response_key: str) -> List[str]:
+async def _fetch_nombres(cod_ope: str, id_empresa: Any, max_items: int, response_key: str) -> List[str]:
     """
     Obtiene una lista de la API y extrae solo los nombres.
 
@@ -42,12 +46,8 @@ def _fetch_nombres(cod_ope: str, id_empresa: Any, max_items: int, response_key: 
     }
     try:
         logger.debug("[PRODUCTOS_SERVICIOS] POST %s - codOpe=%s", app_config.API_INFORMACION_URL, cod_ope)
-        response = requests.post(
-            app_config.API_INFORMACION_URL,
-            json=payload,
-            timeout=app_config.API_TIMEOUT,
-            headers={"Content-Type": "application/json", "Accept": "application/json"},
-        )
+        client = get_client()
+        response = await client.post(app_config.API_INFORMACION_URL, json=payload)
         response.raise_for_status()
         data = response.json()
 
@@ -64,10 +64,10 @@ def _fetch_nombres(cod_ope: str, id_empresa: Any, max_items: int, response_key: 
                 nombres.append(item.strip())
         return nombres
 
-    except requests.exceptions.Timeout:
+    except httpx.TimeoutException:
         logger.warning("[PRODUCTOS_SERVICIOS] Timeout al obtener %s", cod_ope)
         return []
-    except requests.exceptions.RequestException as e:
+    except httpx.RequestError as e:
         logger.warning("[PRODUCTOS_SERVICIOS] Error al obtener %s: %s", cod_ope, e)
         return []
     except Exception as e:
@@ -75,9 +75,9 @@ def _fetch_nombres(cod_ope: str, id_empresa: Any, max_items: int, response_key: 
         return []
 
 
-def fetch_nombres_productos_servicios(id_empresa: Optional[Any]) -> Tuple[List[str], List[str]]:
+async def fetch_nombres_productos_servicios(id_empresa: Optional[Any]) -> Tuple[List[str], List[str]]:
     """
-    Obtiene listas de nombres de productos y servicios (máx 10 de cada).
+    Obtiene listas de nombres de productos y servicios (máx 10 de cada) en paralelo.
 
     Args:
         id_empresa: ID de la empresa. Si es None, retorna listas vacías.
@@ -88,8 +88,13 @@ def fetch_nombres_productos_servicios(id_empresa: Optional[Any]) -> Tuple[List[s
     if id_empresa is None or id_empresa == "":
         return [], []
 
-    nombres_productos = _fetch_nombres("OBTENER_PRODUCTOS_CITAS", id_empresa, _MAX_PRODUCTOS, "productos")
-    nombres_servicios = _fetch_nombres("OBTENER_SERVICIOS_CITAS", id_empresa, _MAX_SERVICIOS, "servicios")
+    results = await asyncio.gather(
+        _fetch_nombres("OBTENER_PRODUCTOS_CITAS", id_empresa, _MAX_PRODUCTOS, "productos"),
+        _fetch_nombres("OBTENER_SERVICIOS_CITAS", id_empresa, _MAX_SERVICIOS, "servicios"),
+        return_exceptions=True,
+    )
+    nombres_productos = results[0] if not isinstance(results[0], Exception) else []
+    nombres_servicios = results[1] if not isinstance(results[1], Exception) else []
 
     return nombres_productos, nombres_servicios
 

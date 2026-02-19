@@ -29,7 +29,6 @@ logger = get_logger(__name__)
 
 @tool
 async def check_availability(
-    service: str,
     date: str,
     time: Optional[str] = None,
     runtime: ToolRuntime = None
@@ -45,7 +44,6 @@ async def check_availability(
     Si no pasas time, se devuelven sugerencias para hoy/mañana (SUGERIR_HORARIOS).
 
     Args:
-        service: Motivo de la reunión o nombre del servicio (ej: "demostración", "consulta", "reunión de ventas")
         date: Fecha en formato ISO (YYYY-MM-DD)
         time: Hora opcional en formato HH:MM AM/PM (ej. "2:00 PM") o 24h. Si el cliente dijo una hora concreta, pásala aquí.
         runtime: Runtime context automático (inyectado por LangChain)
@@ -54,12 +52,12 @@ async def check_availability(
         Texto con horarios disponibles o sugerencias para esa fecha/hora
 
     Examples:
-        >>> await check_availability("demostración", "2026-01-27")
+        >>> await check_availability("2026-01-27")
         "Horarios sugeridos: Lunes 27/01 - 09:00 AM, 10:00 AM, 02:00 PM..."
-        >>> await check_availability("reunión de ventas", "2026-01-31", "2:00 PM")
+        >>> await check_availability("2026-01-31", "2:00 PM")
         "El 2026-01-31 a las 2:00 PM está disponible. ¿Confirmamos la cita?"
     """
-    logger.debug(f"[TOOL] check_availability - Servicio: {service}, Fecha: {date}, Hora: {time or 'no indicada'}")
+    logger.debug("[TOOL] check_availability - Fecha: %s, Hora: %s", date, time or "no indicada")
     
     # Obtener configuración del runtime context
     ctx = runtime.context if runtime else None
@@ -88,21 +86,19 @@ async def check_availability(
             )
             
             if recommendations and recommendations.get("text"):
-                logger.debug(f"[TOOL] check_availability - Recomendaciones obtenidas")
+                logger.debug("[TOOL] check_availability - Recomendaciones obtenidas")
                 return recommendations["text"]
             else:
-                logger.warning(f"[TOOL] check_availability - Sin recomendaciones, usando fallback")
-                return f"Horarios disponibles para {service} el {date}. Consulta directamente para más detalles."
-    
+                logger.warning("[TOOL] check_availability - Sin recomendaciones, usando fallback")
+                return f"Horarios disponibles para el {date}. Consulta directamente para más detalles."
+
     except Exception as e:
-        logger.error(f"[TOOL] check_availability - Error: {e}", exc_info=True)
-        # Fallback a respuesta genérica
-        return f"Horarios típicos disponibles:\n• Mañana: 09:00, 10:00, 11:00\n• Tarde: 14:00, 15:00, 16:00"
+        logger.error("[TOOL] check_availability - Error: %s", e, exc_info=True)
+        return "Horarios típicos disponibles:\n• Mañana: 09:00, 10:00, 11:00\n• Tarde: 14:00, 15:00, 16:00"
 
 
 @tool
 async def create_booking(
-    service: str,
     date: str,
     time: str,
     customer_name: str,
@@ -113,14 +109,13 @@ async def create_booking(
     Crea una nueva cita (evento en calendario) con validación y confirmación real.
 
     Usa esta herramienta SOLO cuando tengas TODOS los datos necesarios:
-    - Motivo de la reunión/servicio, Fecha (YYYY-MM-DD), Hora (HH:MM AM/PM)
+    - Fecha (YYYY-MM-DD), Hora (HH:MM AM/PM)
     - Nombre completo del cliente, Email del cliente (customer_contact)
 
     La herramienta validará el horario y creará el evento en ws_calendario (CREAR_EVENTO).
     La respuesta puede incluir enlace de videollamada (Google Meet) o mensaje de cita confirmada.
 
     Args:
-        service: Motivo de la reunión o servicio (ej: "demostración", "consulta", "reunión de ventas")
         date: Fecha de la cita (YYYY-MM-DD)
         time: Hora de la cita (HH:MM AM/PM)
         customer_name: Nombre completo del cliente
@@ -128,14 +123,14 @@ async def create_booking(
         runtime: Runtime context automático (inyectado por LangChain)
 
     Returns:
-        Mensaje de confirmación, detalles (servicio, fecha, hora, nombre) y, si aplica,
+        Mensaje de confirmación, detalles (fecha, hora, nombre) y, si aplica,
         enlace de videollamada o aviso de "cita confirmada"; o mensaje de error
 
     Examples:
-        >>> await create_booking("demostración", "2026-01-27", "02:00 PM", "Juan Pérez", "cliente@ejemplo.com")
+        >>> await create_booking("2026-01-27", "02:00 PM", "Juan Pérez", "cliente@ejemplo.com")
         "Evento agregado correctamente. Detalles: ... La reunión será por videollamada. Enlace: https://meet.google.com/..."
     """
-    logger.debug(f"[TOOL] create_booking - {service} | {date} {time} | {customer_name}")
+    logger.debug("[TOOL] create_booking - %s %s | %s", date, time, customer_name)
     logger.info("[create_booking] Tool en uso: create_booking")
 
     # Obtener configuración del runtime context
@@ -154,7 +149,6 @@ async def create_booking(
             # 1. VALIDAR datos de entrada
             logger.debug("[TOOL] create_booking - Validando datos de entrada")
             is_valid, error = validate_booking_data(
-                service=service,
                 date=date,
                 time=time,
                 customer_name=customer_name,
@@ -162,7 +156,7 @@ async def create_booking(
             )
 
             if not is_valid:
-                logger.warning(f"[TOOL] create_booking - Datos inválidos: {error}")
+                logger.warning("[TOOL] create_booking - Datos inválidos: %s", error)
                 return f"Datos inválidos: {error}\n\nPor favor verifica la información."
 
             # 2. VALIDAR horario con ScheduleValidator
@@ -178,10 +172,10 @@ async def create_booking(
             )
 
             validation = await validator.validate(date, time)
-            logger.debug(f"[TOOL] create_booking - Validación: {validation}")
+            logger.debug("[TOOL] create_booking - Validación: %s", validation)
 
             if not validation["valid"]:
-                logger.warning(f"[TOOL] create_booking - Horario no válido: {validation['error']}")
+                logger.warning("[TOOL] create_booking - Horario no válido: %s", validation["error"])
                 return f"{validation['error']}\n\nPor favor elige otra fecha u hora."
 
             # 3. Crear evento en ws_calendario (CREAR_EVENTO)
@@ -194,23 +188,21 @@ async def create_booking(
                 correo_cliente=customer_contact or "",
                 fecha=date,
                 hora=time,
-                servicio=service,
                 agendar_usuario=agendar_usuario,
                 duracion_cita_minutos=duracion_cita_minutos,
                 correo_usuario=correo_usuario,
                 log_create_booking_apis=True,
             )
             
-            logger.debug(f"[TOOL] create_booking - Resultado: {booking_result}")
-            
+            logger.debug("[TOOL] create_booking - Resultado: %s", booking_result)
+
             if booking_result["success"]:
                 api_message = booking_result.get("message") or "Evento creado correctamente"
-                logger.info(f"[TOOL] create_booking - Éxito")
+                logger.info("[TOOL] create_booking - Éxito")
                 lines = [
                     api_message,
                     "",
                     "**Detalles:**",
-                    f"• Servicio: {service}",
                     f"• Fecha: {date}",
                     f"• Hora: {time}",
                     f"• Nombre: {customer_name}",
@@ -225,11 +217,11 @@ async def create_booking(
                 return "\n".join(lines)
             else:
                 error_msg = booking_result.get("error") or booking_result.get("message") or "No se pudo confirmar la cita"
-                logger.warning(f"[TOOL] create_booking - Fallo: {error_msg}")
+                logger.warning("[TOOL] create_booking - Fallo: %s", error_msg)
                 return f"{error_msg}\n\nPor favor intenta nuevamente."
     
     except Exception as e:
-        logger.error(f"[TOOL] create_booking - Error inesperado: {e}", exc_info=True)
+        logger.error("[TOOL] create_booking - Error inesperado: %s", e, exc_info=True)
         return f"Error inesperado al crear la cita: {str(e)}\n\nPor favor intenta nuevamente."
 
 
@@ -252,7 +244,7 @@ async def search_productos_servicios(
     Returns:
         Texto con los productos/servicios encontrados (precio, categoría, descripción)
     """
-    logger.debug(f"[TOOL] search_productos_servicios - busqueda: {busqueda}, limite: {limite}")
+    logger.debug("[TOOL] search_productos_servicios - busqueda: %s, limite: %s", busqueda, limite)
     logger.info("[search_productos_servicios] Tool en uso: search_productos_servicios")
 
     ctx = runtime.context if runtime else None
@@ -275,11 +267,12 @@ async def search_productos_servicios(
                 return f"No encontré productos o servicios que coincidan con '{busqueda}'. Prueba con otros términos."
 
             lineas = [f"Encontré {len(productos)} resultado(s) para '{busqueda}':\n"]
+
             lineas.append(format_productos_para_respuesta(productos))
             return "\n".join(lineas)
 
     except Exception as e:
-        logger.error(f"[TOOL] search_productos_servicios - Error: {e}", exc_info=True)
+        logger.error("[TOOL] search_productos_servicios - Error: %s", e, exc_info=True)
         return f"Error al buscar: {str(e)}. Intenta de nuevo."
 
 

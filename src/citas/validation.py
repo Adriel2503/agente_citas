@@ -116,20 +116,10 @@ class BookingDateTime(BaseModel):
 class BookingData(BaseModel):
     """Valida todos los datos necesarios para una cita."""
     
-    service: str = Field(..., min_length=2, max_length=200, description="Servicio/motivo de la cita")
     date: str = Field(..., description="Fecha de la cita")
     time: str = Field(..., description="Hora de la cita")
     customer_name: str = Field(..., description="Nombre del cliente")
     customer_contact: str = Field(..., description="Email del cliente")
-    
-    @field_validator('service')
-    @classmethod
-    def validate_service(cls, v: str) -> str:
-        """Valida el servicio."""
-        v = v.strip()
-        if len(v) < 2:
-            raise ValueError('El servicio debe tener al menos 2 caracteres')
-        return v
     
     @model_validator(mode='after')
     def validate_booking(self):
@@ -203,7 +193,6 @@ def validate_datetime(date: str, time: str) -> tuple[bool, Optional[str]]:
 
 
 def validate_booking_data(
-    service: str,
     date: str,
     time: str,
     customer_name: str,
@@ -218,7 +207,6 @@ def validate_booking_data(
     """
     try:
         BookingData(
-            service=service,
             date=date,
             time=time,
             customer_name=customer_name,

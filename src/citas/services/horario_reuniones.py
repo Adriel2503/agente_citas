@@ -3,17 +3,20 @@ Horario de reuniones: fetch desde API MaravIA y formateo para system prompt.
 Usa OBTENER_HORARIO_REUNIONES (ws_informacion_ia.php).
 """
 
-import logging
 from typing import Any, Dict, Optional
 
-import requests
+import httpx
 
 try:
     from .. import config as app_config
+    from ..logger import get_logger
+    from .http_client import get_client
 except ImportError:
     from citas import config as app_config
+    from citas.logger import get_logger
+    from citas.services.http_client import get_client
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 _DIAS_ORDEN = [
     ("Lunes", "reunion_lunes"),
@@ -55,7 +58,7 @@ def format_horario_for_system_prompt(horario_reuniones: Dict[str, Any]) -> str:
     return "\n".join(lineas)
 
 
-def fetch_horario_reuniones(id_empresa: Optional[Any]) -> str:
+async def fetch_horario_reuniones(id_empresa: Optional[Any]) -> str:
     """
     Obtiene el horario de reuniones desde la API y lo devuelve formateado para el system prompt.
 
@@ -74,12 +77,8 @@ def fetch_horario_reuniones(id_empresa: Optional[Any]) -> str:
     }
     try:
         logger.debug("[HORARIO] Obteniendo horario para id_empresa=%s", id_empresa)
-        response = requests.post(
-            app_config.API_INFORMACION_URL,
-            json=payload,
-            timeout=app_config.API_TIMEOUT,
-            headers={"Content-Type": "application/json", "Accept": "application/json"},
-        )
+        client = get_client()
+        response = await client.post(app_config.API_INFORMACION_URL, json=payload)
         response.raise_for_status()
         data = response.json()
         if not data.get("success"):
@@ -89,10 +88,10 @@ def fetch_horario_reuniones(id_empresa: Optional[Any]) -> str:
         if not horario:
             return "No hay horario cargado."
         return format_horario_for_system_prompt(horario)
-    except requests.exceptions.Timeout:
+    except httpx.TimeoutException:
         logger.warning("[HORARIO] Timeout al obtener horario para system prompt")
         return "No hay horario cargado."
-    except requests.exceptions.RequestException as e:
+    except httpx.RequestError as e:
         logger.warning("[HORARIO] Error al obtener horario para system prompt: %s", e)
         return "No hay horario cargado."
     except Exception as e:

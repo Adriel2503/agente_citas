@@ -15,10 +15,12 @@ try:
     from ..logger import get_logger
     from ..metrics import track_api_call, record_booking_attempt, record_booking_success, record_booking_failure
     from .. import config as app_config
+    from .http_client import get_client
 except ImportError:
     from citas.logger import get_logger
     from citas.metrics import track_api_call, record_booking_attempt, record_booking_success, record_booking_failure
     from citas import config as app_config
+    from citas.services.http_client import get_client
 
 logger = get_logger(__name__)
 
@@ -57,7 +59,6 @@ async def confirm_booking(
     correo_cliente: str,
     fecha: str,
     hora: str,
-    servicio: str,
     agendar_usuario: int,
     duracion_cita_minutos: int = 60,
     correo_usuario: str = "",
@@ -73,7 +74,6 @@ async def confirm_booking(
         correo_cliente: Email del cliente (correo_cliente en API)
         fecha: Fecha en formato YYYY-MM-DD
         hora: Hora en formato HH:MM AM/PM
-        servicio: Servicio/motivo de la cita (usado en titulo)
         agendar_usuario: 1 = asignar vendedor automáticamente, 0 = no
         duracion_cita_minutos: Minutos de la cita para calcular fecha_fin
         correo_usuario: Email del usuario/vendedor (desde orquestador)
@@ -86,7 +86,7 @@ async def confirm_booking(
     try:
         fecha_inicio, fecha_fin = _build_fecha_inicio_fin(fecha, hora, duracion_cita_minutos)
     except ValueError as e:
-        logger.warning(f"[BOOKING] Fecha/hora inválidos: {e}")
+        logger.warning("[BOOKING] Fecha/hora inválidos: %s", e)
         record_booking_failure("invalid_datetime")
         return {
             "success": False,
@@ -113,27 +113,23 @@ async def confirm_booking(
             logger.info("[create_booking] API 3: ws_calendario.php - CREAR_EVENTO")
             logger.info("  URL: %s", app_config.API_CALENDAR_URL)
             logger.info("  Enviado: %s", json.dumps(payload, ensure_ascii=False))
-        logger.debug(f"[BOOKING] Creando evento: {servicio} - {fecha} {hora} - {nombre_completo}")
-        logger.debug(f"[BOOKING] Payload: {payload}")
+        logger.debug("[BOOKING] Creando evento: %s %s - %s", fecha, hora, nombre_completo)
+        logger.debug("[BOOKING] Payload: %s", payload)
         logger.debug("[BOOKING] JSON enviado a ws_calendario.php (CREAR_EVENTO): %s", json.dumps(payload, ensure_ascii=False, indent=2))
 
         with track_api_call("crear_evento"):
-            async with httpx.AsyncClient(timeout=app_config.API_TIMEOUT) as client:
-                response = await client.post(
-                    app_config.API_CALENDAR_URL,
-                    json=payload,
-                    headers={"Content-Type": "application/json"},
-                )
-                response.raise_for_status()
-                data = response.json()
+            client = get_client()
+            response = await client.post(app_config.API_CALENDAR_URL, json=payload)
+            response.raise_for_status()
+            data = response.json()
 
         if log_create_booking_apis:
             logger.info("  Respuesta: %s", json.dumps(data, ensure_ascii=False))
-        logger.debug(f"[BOOKING] Respuesta API: {data}")
+        logger.debug("[BOOKING] Respuesta API: %s", data)
 
         if data.get("success"):
             message = data.get("message") or "Evento creado correctamente"
-            logger.info(f"[BOOKING] Evento creado - {message}")
+            logger.info("[BOOKING] Evento creado - %s", message)
             record_booking_success()
             result = {
                 "success": True,
@@ -149,7 +145,7 @@ async def confirm_booking(
             return result
         else:
             error_msg = data.get("message") or data.get("error") or "Error desconocido"
-            logger.warning(f"[BOOKING] Creación fallida: {error_msg}")
+            logger.warning("[BOOKING] Creación fallida: %s", error_msg)
             record_booking_failure("api_error")
             return {
                 "success": False,
@@ -167,7 +163,7 @@ async def confirm_booking(
         }
 
     except httpx.HTTPStatusError as e:
-        logger.error(f"[BOOKING] Error HTTP {e.response.status_code}: {e}")
+        logger.error("[BOOKING] Error HTTP %s: %s", e.response.status_code, e)
         record_booking_failure(f"http_{e.response.status_code}")
         return {
             "success": False,
@@ -176,7 +172,7 @@ async def confirm_booking(
         }
 
     except httpx.RequestError as e:
-        logger.error(f"[BOOKING] Error de conexión: {e}")
+        logger.error("[BOOKING] Error de conexión: %s", e)
         record_booking_failure("connection_error")
         return {
             "success": False,
@@ -185,7 +181,7 @@ async def confirm_booking(
         }
 
     except Exception as e:
-        logger.error(f"[BOOKING] Error inesperado: {e}", exc_info=True)
+        logger.error("[BOOKING] Error inesperado: %s", e, exc_info=True)
         record_booking_failure("unknown_error")
         return {
             "success": False,

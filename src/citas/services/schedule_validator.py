@@ -3,6 +3,7 @@ Validador de horarios para citas/reuniones.
 Versión mejorada con async, cache global y logging.
 """
 
+import asyncio
 import json
 import httpx
 import threading
@@ -14,10 +15,12 @@ try:
     from ..logger import get_logger
     from ..metrics import track_api_call, update_cache_stats
     from .. import config as app_config
+    from .http_client import get_client
 except ImportError:
     from citas.logger import get_logger
     from citas.metrics import track_api_call, update_cache_stats
     from citas import config as app_config
+    from citas.services.http_client import get_client
 
 logger = get_logger(__name__)
 
@@ -51,6 +54,13 @@ _ZONA_PERU = ZoneInfo(app_config.TIMEZONE)
 _SCHEDULE_CACHE: Dict[int, Tuple[Dict, datetime]] = {}
 _CACHE_LOCK = threading.Lock()
 
+# Lock por id_empresa para serializar el fetch HTTP cuando el cache está vacío.
+# Previene thundering herd: N requests concurrentes de la misma empresa
+# no hacen N llamadas a la API -- solo la primera fetcha, las demás esperan.
+# Crece con cada empresa; se limpia cuando supera _FETCH_LOCKS_CLEANUP_THRESHOLD.
+_fetch_locks: Dict[int, asyncio.Lock] = {}
+_FETCH_LOCKS_CLEANUP_THRESHOLD = 500
+
 
 def _get_cached_schedule(id_empresa: int) -> Optional[Dict]:
     """
@@ -68,10 +78,10 @@ def _get_cached_schedule(id_empresa: int) -> Optional[Dict]:
             ttl = timedelta(minutes=app_config.SCHEDULE_CACHE_TTL_MINUTES)
             
             if datetime.now() - timestamp < ttl:
-                logger.debug(f"[CACHE] Hit para empresa {id_empresa}")
+                logger.debug("[CACHE] Hit para empresa %s", id_empresa)
                 return schedule
             else:
-                logger.debug(f"[CACHE] Expirado para empresa {id_empresa}")
+                logger.debug("[CACHE] Expirado para empresa %s", id_empresa)
                 del _SCHEDULE_CACHE[id_empresa]
         
         return None
@@ -88,7 +98,7 @@ def _set_cached_schedule(id_empresa: int, schedule: Dict) -> None:
     with _CACHE_LOCK:
         _SCHEDULE_CACHE[id_empresa] = (schedule, datetime.now())
         update_cache_stats('schedule', len(_SCHEDULE_CACHE))
-        logger.debug(f"[CACHE] Guardado para empresa {id_empresa}")
+        logger.debug("[CACHE] Guardado para empresa %s", id_empresa)
 
 
 def _clear_cache():
@@ -97,6 +107,37 @@ def _clear_cache():
         _SCHEDULE_CACHE.clear()
         update_cache_stats('schedule', 0)
         logger.debug("[CACHE] Cache limpiado")
+
+
+async def _cleanup_stale_fetch_locks(current_id_empresa: int) -> None:
+    """
+    Elimina locks de _fetch_locks cuyas empresas ya no están en _SCHEDULE_CACHE.
+    Solo se ejecuta si el dict supera _FETCH_LOCKS_CLEANUP_THRESHOLD.
+    Evita crecimiento indefinido cuando hay muchas empresas.
+    """
+    if len(_fetch_locks) <= _FETCH_LOCKS_CLEANUP_THRESHOLD:
+        return
+    with _CACHE_LOCK:
+        cached_ids = set(_SCHEDULE_CACHE.keys())
+    removed = 0
+    for eid in list(_fetch_locks.keys()):
+        if eid == current_id_empresa:
+            continue
+        if eid in cached_ids:
+            continue
+        lock = _fetch_locks.get(eid)
+        if lock is None:
+            continue
+        try:
+            await asyncio.wait_for(lock.acquire(), timeout=0)
+        except asyncio.TimeoutError:
+            pass
+        else:
+            del _fetch_locks[eid]
+            lock.release()
+            removed += 1
+    if removed:
+        logger.debug("[SCHEDULE] Limpieza de fetch locks: %s eliminados", removed)
 
 
 # ========== VALIDADOR DE HORARIOS ==========
@@ -126,58 +167,67 @@ class ScheduleValidator:
     async def _fetch_schedule(self) -> Optional[Dict]:
         """
         Obtiene el horario de reuniones desde el endpoint (con cache).
-        
+
+        Usa double-checked locking por id_empresa para evitar thundering herd:
+        si N requests llegan con cache vacío, solo la primera hace el HTTP call;
+        las demás esperan el lock y encuentran el cache ya lleno.
+
         Returns:
             Diccionario con el horario o None si hay error
         """
-        # Intentar obtener del cache primero
+        # 1. Fast path: cache hit sin adquirir ningún lock (caso más común)
         cached = _get_cached_schedule(self.id_empresa)
         if cached:
             return cached
 
-        # No está en cache, hacer fetch
-        logger.debug(f"[SCHEDULE] Fetching horario para empresa {self.id_empresa}")
-        payload_horario = {
-            "codOpe": "OBTENER_HORARIO_REUNIONES",
-            "id_empresa": self.id_empresa
-        }
-        if self.log_create_booking_apis:
-            logger.info("[create_booking] API 1: ws_informacion_ia.php - OBTENER_HORARIO_REUNIONES")
-            logger.info("  URL: %s", app_config.API_INFORMACION_URL)
-            logger.info("  Enviado: %s", json.dumps(payload_horario, ensure_ascii=False))
-        logger.debug("[SCHEDULE] JSON enviado a ws_informacion_ia.php (OBTENER_HORARIO_REUNIONES): %s", json.dumps(payload_horario, ensure_ascii=False, indent=2))
-        try:
-            with track_api_call("obtener_horario"):
-                async with httpx.AsyncClient(timeout=app_config.API_TIMEOUT) as client:
-                    response = await client.post(
-                        app_config.API_INFORMACION_URL,
-                        json=payload_horario,
-                        headers={"Content-Type": "application/json"}
-                    )
+        # 2. Cache miss: serializar el fetch por id_empresa
+        await _cleanup_stale_fetch_locks(self.id_empresa)
+        lock = _fetch_locks.setdefault(self.id_empresa, asyncio.Lock())
+        async with lock:
+            # 3. Double-check: otra coroutine pudo haber llenado el cache mientras esperábamos
+            cached = _get_cached_schedule(self.id_empresa)
+            if cached:
+                return cached
+
+            # 4. Fetch real — solo una coroutine por id_empresa llega aquí a la vez
+            logger.debug("[SCHEDULE] Fetching horario para empresa %s", self.id_empresa)
+            payload_horario = {
+                "codOpe": "OBTENER_HORARIO_REUNIONES",
+                "id_empresa": self.id_empresa
+            }
+            if self.log_create_booking_apis:
+                logger.info("[create_booking] API 1: ws_informacion_ia.php - OBTENER_HORARIO_REUNIONES")
+                logger.info("  URL: %s", app_config.API_INFORMACION_URL)
+                logger.info("  Enviado: %s", json.dumps(payload_horario, ensure_ascii=False))
+            logger.debug("[SCHEDULE] JSON enviado a ws_informacion_ia.php (OBTENER_HORARIO_REUNIONES): %s", json.dumps(payload_horario, ensure_ascii=False, indent=2))
+            try:
+                with track_api_call("obtener_horario"):
+                    client = get_client()
+                    response = await client.post(app_config.API_INFORMACION_URL, json=payload_horario)
                     response.raise_for_status()
                     data = response.json()
 
-            if self.log_create_booking_apis:
-                logger.info("  Respuesta: %s", json.dumps(data, ensure_ascii=False))
+                if self.log_create_booking_apis:
+                    logger.info("  Respuesta: %s", json.dumps(data, ensure_ascii=False))
 
-            if data.get("success") and data.get("horario_reuniones"):
-                schedule = data["horario_reuniones"]
-                _set_cached_schedule(self.id_empresa, schedule)
-                logger.debug(f"[SCHEDULE] Horario obtenido y cacheado para empresa {self.id_empresa}")
-                return schedule
+                if data.get("success") and data.get("horario_reuniones"):
+                    schedule = data["horario_reuniones"]
+                    _set_cached_schedule(self.id_empresa, schedule)
+                    logger.debug("[SCHEDULE] Horario obtenido y cacheado para empresa %s", self.id_empresa)
+                    return schedule
 
-            logger.warning(f"[SCHEDULE] Respuesta sin horario: {data}")
-            return None
+                logger.warning("[SCHEDULE] Respuesta sin horario: %s", data)
+                return None
 
-        except httpx.TimeoutException:
-            logger.error(f"[SCHEDULE] Timeout al obtener horario para empresa {self.id_empresa}")
-            return None
-        except httpx.HTTPError as e:
-            logger.error(f"[SCHEDULE] Error HTTP al obtener horario: {e}")
-            return None
-        except Exception as e:
-            logger.error(f"[SCHEDULE] Error inesperado al obtener horario: {e}", exc_info=True)
-            return None
+            except httpx.TimeoutException:
+                logger.error("[SCHEDULE] Timeout al obtener horario para empresa %s", self.id_empresa)
+                return None
+            except httpx.HTTPError as e:
+                logger.error("[SCHEDULE] Error HTTP al obtener horario: %s", e)
+                return None
+            except Exception as e:
+                logger.error("[SCHEDULE] Error inesperado al obtener horario: %s", e, exc_info=True)
+                return None
 
     def _parse_time(self, time_str: str) -> Optional[datetime]:
         """
@@ -245,7 +295,6 @@ class ScheduleValidator:
 
         try:
             # Formato esperado: JSON array o string separado por comas
-            import json
             try:
                 bloqueados = json.loads(horarios_bloqueados)
             except json.JSONDecodeError:
@@ -260,7 +309,7 @@ class ScheduleValidator:
                         fin = self._parse_time(bloqueo.get("fin", ""))
                         if inicio and fin:
                             if inicio.time() <= hora.time() < fin.time():
-                                logger.debug(f"[BLOCKED] Hora {hora.time()} está bloqueada")
+                                logger.debug("[BLOCKED] Hora %s está bloqueada", hora.time())
                                 return True
                 elif isinstance(bloqueo, str):
                     if fecha_str in bloqueo:
@@ -269,11 +318,11 @@ class ScheduleValidator:
                         if rango:
                             inicio, fin = rango
                             if inicio.time() <= hora.time() < fin.time():
-                                logger.debug(f"[BLOCKED] Hora {hora.time()} está bloqueada")
+                                logger.debug("[BLOCKED] Hora %s está bloqueada", hora.time())
                                 return True
 
         except Exception as e:
-            logger.warning(f"[SCHEDULE] Error parseando horarios bloqueados: {e}")
+            logger.warning("[SCHEDULE] Error parseando horarios bloqueados: %s", e)
 
         return False
 
@@ -313,25 +362,21 @@ class ScheduleValidator:
                 logger.info("[create_booking] API 2: ws_agendar_reunion.php - CONSULTAR_DISPONIBILIDAD")
                 logger.info("  URL: %s", app_config.API_AGENDAR_REUNION_URL)
                 logger.info("  Enviado: %s", json.dumps(payload, ensure_ascii=False))
-            logger.debug(f"[AVAILABILITY] Consultando: {fecha_str} {hora_str}")
+            logger.debug("[AVAILABILITY] Consultando: %s %s", fecha_str, hora_str)
             logger.debug("[AVAILABILITY] JSON enviado a ws_agendar_reunion.php (CONSULTAR_DISPONIBILIDAD): %s", json.dumps(payload, ensure_ascii=False, indent=2))
 
             with track_api_call("consultar_disponibilidad"):
-                async with httpx.AsyncClient(timeout=app_config.API_TIMEOUT) as client:
-                    response = await client.post(
-                        app_config.API_AGENDAR_REUNION_URL,
-                        json=payload,
-                        headers={"Content-Type": "application/json"}
-                    )
-                    response.raise_for_status()
-                    data = response.json()
+                client = get_client()
+                response = await client.post(app_config.API_AGENDAR_REUNION_URL, json=payload)
+                response.raise_for_status()
+                data = response.json()
 
             if self.log_create_booking_apis:
                 logger.info("  Respuesta: %s", json.dumps(data, ensure_ascii=False))
-            logger.debug(f"[AVAILABILITY] Disponible: {data.get('disponible')}")
+            logger.debug("[AVAILABILITY] Disponible: %s", data.get("disponible"))
 
             if not data.get("success"):
-                logger.warning(f"[AVAILABILITY] Respuesta sin éxito: {data}")
+                logger.warning("[AVAILABILITY] Respuesta sin éxito: %s", data)
                 return {"available": True, "error": None}  # Graceful degradation
 
             if data.get("disponible"):
@@ -346,10 +391,10 @@ class ScheduleValidator:
             logger.warning("[AVAILABILITY] Timeout - graceful degradation")
             return {"available": True, "error": None}
         except httpx.HTTPError as e:
-            logger.warning(f"[AVAILABILITY] Error HTTP: {e} - graceful degradation")
+            logger.warning("[AVAILABILITY] Error HTTP: %s - graceful degradation", e)
             return {"available": True, "error": None}
         except Exception as e:
-            logger.warning(f"[AVAILABILITY] Error inesperado: {e} - graceful degradation")
+            logger.warning("[AVAILABILITY] Error inesperado: %s - graceful degradation", e)
             return {"available": True, "error": None}
 
     async def validate(self, fecha_str: str, hora_str: str) -> Dict[str, Any]:
@@ -408,7 +453,7 @@ class ScheduleValidator:
         # 8. Parsear el rango de horario del día
         rango = self._parse_time_range(horario_dia)
         if not rango:
-            logger.warning(f"[SCHEDULE] No se pudo parsear horario del día: {horario_dia}")
+            logger.warning("[SCHEDULE] No se pudo parsear horario del día: %s", horario_dia)
             return {"valid": True, "error": None}
 
         hora_inicio, hora_fin = rango
@@ -441,7 +486,7 @@ class ScheduleValidator:
         if not availability["available"]:
             return {"valid": False, "error": availability["error"]}
 
-        logger.debug(f"[VALIDATION] ✅ Horario válido: {fecha_str} {hora_str}")
+        logger.debug("[VALIDATION] Horario válido: %s %s", fecha_str, hora_str)
         return {"valid": True, "error": None}
 
     async def recommendation(
@@ -505,14 +550,10 @@ class ScheduleValidator:
         logger.debug("[RECOMMENDATION] JSON enviado a ws_agendar_reunion.php (SUGERIR_HORARIOS): %s", json.dumps(payload, ensure_ascii=False, indent=2))
         try:
             with track_api_call("sugerir_horarios"):
-                async with httpx.AsyncClient(timeout=app_config.API_TIMEOUT) as client:
-                    response = await client.post(
-                        app_config.API_AGENDAR_REUNION_URL,
-                        json=payload,
-                        headers={"Content-Type": "application/json"},
-                    )
-                    response.raise_for_status()
-                    data = response.json()
+                client = get_client()
+                response = await client.post(app_config.API_AGENDAR_REUNION_URL, json=payload)
+                response.raise_for_status()
+                data = response.json()
 
             if data.get("success"):
                 sugerencias = data.get("sugerencias", [])

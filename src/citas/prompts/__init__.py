@@ -2,6 +2,7 @@
 Prompts del agente de citas. Builder del system prompt.
 """
 
+import asyncio
 from pathlib import Path
 from typing import Any, Dict, List
 from datetime import datetime
@@ -35,6 +36,12 @@ _DEFAULTS: Dict[str, Any] = {
     "personalidad": "amable, profesional y eficiente",
 }
 
+_jinja_env = Environment(
+    loader=FileSystemLoader(str(_TEMPLATES_DIR)),
+    autoescape=select_autoescape(disabled_extensions=()),
+)
+_citas_template = _jinja_env.get_template("citas_system.j2")
+
 
 def _now_peru() -> datetime:
     """Fecha y hora actual en Perú (America/Lima)."""
@@ -50,28 +57,22 @@ def _apply_defaults(config: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
-def build_citas_system_prompt(
+async def build_citas_system_prompt(
     config: Dict[str, Any],
     history: List[Dict] = None
 ) -> str:
     """
     Construye el system prompt del agente de citas.
-    
+
     Args:
         config: Diccionario con id_empresa, personalidad, etc.
         history: Lista de turnos previos [{"user": "...", "response": "..."}]
-    
+
     Returns:
         System prompt formateado con historial.
     """
-    env = Environment(
-        loader=FileSystemLoader(str(_TEMPLATES_DIR)),
-        autoescape=select_autoescape(disabled_extensions=()),
-    )
-    template = env.get_template("citas_system.j2")
-    
     variables = _apply_defaults(config)
-    
+
     # Fecha y hora actual en Perú (para que el agente sepa "hoy" y "mañana")
     now = _now_peru()
     variables["fecha_iso"] = variables.get("fecha_iso") or now.strftime("%Y-%m-%d")
@@ -86,13 +87,20 @@ def build_citas_system_prompt(
         variables["hora_actual"],
         variables["fecha_iso"],
     )
-    
-    # Horario de atención (OBTENER_HORARIO_REUNIONES) para inyectar en el prompt
-    id_empresa = config.get("id_empresa")
-    variables["horario_atencion"] = fetch_horario_reuniones(id_empresa)
 
-    # Productos y servicios (solo nombres, máx 10 de cada)
-    nombres_productos, nombres_servicios = fetch_nombres_productos_servicios(id_empresa)
+    # Cargar horario y productos/servicios en paralelo
+    id_empresa = config.get("id_empresa")
+    results = await asyncio.gather(
+        fetch_horario_reuniones(id_empresa),
+        fetch_nombres_productos_servicios(id_empresa),
+        return_exceptions=True,
+    )
+
+    horario_atencion = results[0] if not isinstance(results[0], Exception) else "No hay horario cargado."
+    prods_servs = results[1] if not isinstance(results[1], Exception) else ([], [])
+    nombres_productos, nombres_servicios = prods_servs
+
+    variables["horario_atencion"] = horario_atencion
     variables["nombres_productos"] = nombres_productos
     variables["nombres_servicios"] = nombres_servicios
     variables["lista_productos_servicios"] = format_nombres_para_prompt(nombres_productos, nombres_servicios)
@@ -100,8 +108,8 @@ def build_citas_system_prompt(
     # Agregar historial
     variables["history"] = history or []
     variables["has_history"] = bool(history)
-    
-    return template.render(**variables)
+
+    return _citas_template.render(**variables)
 
 
 __all__ = ["build_citas_system_prompt"]
