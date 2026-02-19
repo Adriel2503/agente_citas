@@ -6,7 +6,14 @@ Valida formato de email, fechas, etc. Para citas se acepta solo email (no teléf
 import re
 from datetime import datetime
 from typing import Optional
+from zoneinfo import ZoneInfo
+
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+try:
+    from .. import config as app_config
+except ImportError:
+    from citas import config as app_config
 
 # Patrón básico para email (RFC 5322 simplificado)
 _EMAIL_PATTERN = re.compile(
@@ -82,8 +89,8 @@ class BookingDateTime(BaseModel):
         try:
             date_obj = datetime.strptime(v, "%Y-%m-%d")
             
-            # Validar que no sea en el pasado
-            if date_obj.date() < datetime.now().date():
+            # Validar que no sea en el pasado (usa hora de Perú, no del servidor)
+            if date_obj.date() < datetime.now(ZoneInfo(app_config.TIMEZONE)).date():
                 raise ValueError('La fecha no puede ser en el pasado')
             
             return v
