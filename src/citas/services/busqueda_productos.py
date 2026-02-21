@@ -60,10 +60,10 @@ def _format_item(p: Dict[str, Any]) -> List[str]:
     )
 
     lineas = [
-        f"### {nombre}",
-        f"- **Precio:** {precio_str} por {unidad}",
-        f"- **Categoría:** {categoria}",
-        f"- **Descripción:** {descripcion}",
+        f"*{nombre}*",
+        f"- Precio: {precio_str} por {unidad}",
+        f"- Categoría: {categoria}",
+        f"- Descripción: {descripcion}",
         "",
     ]
     return lineas
