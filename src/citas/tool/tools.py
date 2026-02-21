@@ -202,7 +202,7 @@ async def create_booking(
                 lines = [
                     api_message,
                     "",
-                    "**Detalles:**",
+                    "Detalles:",
                     f"• Fecha: {date}",
                     f"• Hora: {time}",
                     f"• Nombre: {customer_name}",
