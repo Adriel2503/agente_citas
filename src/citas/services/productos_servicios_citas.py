@@ -105,13 +105,13 @@ def format_nombres_para_prompt(nombres_productos: List[str], nombres_servicios: 
     """
     lineas = []
     if nombres_productos:
-        lineas.append("**Productos:** " + ", ".join(nombres_productos))
+        lineas.append("Productos: " + ", ".join(nombres_productos))
     else:
-        lineas.append("**Productos:** (ninguno cargado)")
+        lineas.append("Productos: (ninguno cargado)")
     if nombres_servicios:
-        lineas.append("**Servicios:** " + ", ".join(nombres_servicios))
+        lineas.append("Servicios: " + ", ".join(nombres_servicios))
     else:
-        lineas.append("**Servicios:** (ninguno cargado)")
+        lineas.append("Servicios: (ninguno cargado)")
     return "\n".join(lineas)
 
 
