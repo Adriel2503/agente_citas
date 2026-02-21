@@ -25,12 +25,11 @@ _preguntas_cache: TTLCache = TTLCache(maxsize=500, ttl=3600)
 
 def format_preguntas_frecuentes_para_prompt(items: List[Dict[str, Any]]) -> str:
     """
-    Formatea la lista de FAQs (pregunta, respuesta) para inyectar en el system prompt.
-    Usa etiquetas claras "Pregunta:" y "Respuesta:" para que el modelo entienda el formato.
-    Opcionalmente agrupa por categoria si viene informada.
+    Formatea la lista de FAQs (solo pregunta y respuesta) para inyectar en el system prompt.
+    Usa etiquetas "Pregunta:" y "Respuesta:" para que el modelo entienda el formato.
 
     Args:
-        items: Lista de dicts con al menos "pregunta" y "respuesta". Opcional "categoria".
+        items: Lista de dicts con "pregunta" y "respuesta".
 
     Returns:
         String listo para el system prompt.
@@ -39,17 +38,11 @@ def format_preguntas_frecuentes_para_prompt(items: List[Dict[str, Any]]) -> str:
         return ""
 
     lineas = []
-    categoria_actual = None
-
     for item in items:
         pregunta = (item.get("pregunta") or "").strip()
         respuesta = (item.get("respuesta") or "").strip()
         if not pregunta and not respuesta:
             continue
-        categoria = (item.get("categoria") or "").strip()
-        if categoria and categoria != categoria_actual:
-            categoria_actual = categoria
-            lineas.append(f"[Categoria: {categoria}]")
         lineas.append(f"Pregunta: {pregunta or '(sin texto)'}")
         lineas.append(f"Respuesta: {respuesta or '(sin texto)'}")
         lineas.append("")
