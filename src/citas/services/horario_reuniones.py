@@ -82,19 +82,25 @@ async def fetch_horario_reuniones(id_empresa: Optional[Any]) -> str:
         response.raise_for_status()
         data = response.json()
         if not data.get("success"):
+            logger.info("[HORARIO] Respuesta recibida id_empresa=%s, API sin éxito: %s", id_empresa, data.get("error"))
             logger.warning("[HORARIO] API no success: %s", data.get("error"))
             return "No hay horario cargado."
         horario = data.get("horario_reuniones")
         if not horario:
+            logger.info("[HORARIO] Respuesta recibida id_empresa=%s, horario vacío", id_empresa)
             return "No hay horario cargado."
+        logger.info("[HORARIO] Respuesta recibida id_empresa=%s, horario cargado (%s días)", id_empresa, len(_DIAS_ORDEN))
         return format_horario_for_system_prompt(horario)
-    except httpx.TimeoutException:
+    except httpx.TimeoutException as e:
+        logger.info("[HORARIO] No se pudo obtener horario id_empresa=%s: %s", id_empresa, e)
         logger.warning("[HORARIO] Timeout al obtener horario para system prompt")
         return "No hay horario cargado."
     except httpx.RequestError as e:
+        logger.info("[HORARIO] No se pudo obtener horario id_empresa=%s: %s", id_empresa, e)
         logger.warning("[HORARIO] Error al obtener horario para system prompt: %s", e)
         return "No hay horario cargado."
     except Exception as e:
+        logger.info("[HORARIO] No se pudo obtener horario id_empresa=%s: %s", id_empresa, e)
         logger.warning("[HORARIO] Error inesperado: %s", e)
         return "No hay horario cargado."
 

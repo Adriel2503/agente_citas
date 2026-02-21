@@ -72,6 +72,7 @@ async def fetch_preguntas_frecuentes(id_chatbot: Optional[Any]) -> str:
             id_chatbot,
             "vacío" if not cached else "presente",
         )
+        logger.info("[PREGUNTAS_FRECUENTES] Respuesta recibida id_chatbot=%s (cache)", id_chatbot)
         return cached if cached else ""
 
     payload = {"id_chatbot": id_chatbot}
@@ -85,15 +86,18 @@ async def fetch_preguntas_frecuentes(id_chatbot: Optional[Any]) -> str:
         response.raise_for_status()
         data = response.json()
         if not data.get("success"):
-            logger.debug("[PREGUNTAS_FRECUENTES] API no success: %s", data.get("error"))
+            logger.info("[PREGUNTAS_FRECUENTES] Respuesta recibida id_chatbot=%s, API sin éxito: %s", id_chatbot, data.get("error"))
             return ""
         items = data.get("preguntas_frecuentes") or []
         if not items:
+            logger.info("[PREGUNTAS_FRECUENTES] Respuesta recibida id_chatbot=%s, sin preguntas", id_chatbot)
             return ""
+        logger.info("[PREGUNTAS_FRECUENTES] Respuesta recibida id_chatbot=%s, %s preguntas", id_chatbot, len(items))
         formatted = format_preguntas_frecuentes_para_prompt(items)
         _preguntas_cache[id_chatbot] = formatted
         return formatted
     except (httpx.TimeoutException, httpx.RequestError, Exception) as e:
+        logger.info("[PREGUNTAS_FRECUENTES] No se pudo obtener FAQs id_chatbot=%s: %s", id_chatbot, e)
         logger.debug(
             "[PREGUNTAS_FRECUENTES] Error id_chatbot=%s: %s",
             id_chatbot,

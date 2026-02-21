@@ -56,6 +56,7 @@ async def fetch_contexto_negocio(id_empresa: Optional[Any]) -> Optional[str]:
             "[CONTEXTO_NEGOCIO] Cache hit id_empresa=%s (valor=%s)",
             id_empresa, "vacío" if not contexto else "presente"
         )
+        logger.info("[CONTEXTO_NEGOCIO] Respuesta recibida id_empresa=%s (cache), longitud=%s caracteres", id_empresa, len(contexto) if contexto else 0)
         return contexto if contexto else None
 
     # 2. Circuit breaker
@@ -79,10 +80,14 @@ async def fetch_contexto_negocio(id_empresa: Optional[Any]) -> Optional[str]:
             response.raise_for_status()
             data = response.json()
             if not data.get("success"):
-                logger.debug("[CONTEXTO_NEGOCIO] API no success: %s", data.get("error"))
+                logger.info("[CONTEXTO_NEGOCIO] Respuesta recibida id_empresa=%s, API sin éxito: %s", id_empresa, data.get("error"))
                 return None
             contexto = data.get("contexto_negocio") or ""
             contexto = str(contexto).strip() if contexto else ""
+            if contexto:
+                logger.info("[CONTEXTO_NEGOCIO] Respuesta recibida id_empresa=%s, longitud=%s caracteres", id_empresa, len(contexto))
+            else:
+                logger.info("[CONTEXTO_NEGOCIO] Respuesta recibida id_empresa=%s, contexto vacío", id_empresa)
             _contexto_cache[id_empresa] = contexto
             _contexto_failures.pop(id_empresa, None)
             return contexto if contexto else None
@@ -100,6 +105,7 @@ async def fetch_contexto_negocio(id_empresa: Optional[Any]) -> Optional[str]:
         logger.debug("[CONTEXTO_NEGOCIO] Fallos para id_empresa=%s", id_empresa)
         current = _contexto_failures.get(id_empresa, 0)
         _contexto_failures[id_empresa] = current + 1
+    logger.info("[CONTEXTO_NEGOCIO] No se pudo obtener contexto id_empresa=%s tras %d intentos", id_empresa, max_retries)
     return None
 
 

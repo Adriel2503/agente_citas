@@ -96,6 +96,7 @@ async def fetch_nombres_productos_servicios(id_empresa: Optional[Any]) -> Tuple[
     nombres_productos = results[0] if not isinstance(results[0], Exception) else []
     nombres_servicios = results[1] if not isinstance(results[1], Exception) else []
 
+    logger.info("[PRODUCTOS_SERVICIOS] Respuesta recibida id_empresa=%s: %s productos, %s servicios", id_empresa, len(nombres_productos), len(nombres_servicios))
     return nombres_productos, nombres_servicios
 
 
