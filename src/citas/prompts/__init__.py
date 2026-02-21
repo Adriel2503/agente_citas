@@ -13,11 +13,13 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 try:
     from .. import config as app_config
     from ..logger import get_logger
+    from ..services.contexto_negocio import fetch_contexto_negocio
     from ..services.horario_reuniones import fetch_horario_reuniones
     from ..services.productos_servicios_citas import fetch_nombres_productos_servicios, format_nombres_para_prompt
 except ImportError:
     from citas import config as app_config
     from citas.logger import get_logger
+    from citas.services.contexto_negocio import fetch_contexto_negocio
     from citas.services.horario_reuniones import fetch_horario_reuniones
     from citas.services.productos_servicios_citas import fetch_nombres_productos_servicios, format_nombres_para_prompt
 
@@ -88,22 +90,25 @@ async def build_citas_system_prompt(
         variables["fecha_iso"],
     )
 
-    # Cargar horario y productos/servicios en paralelo
+    # Cargar horario, productos/servicios y contexto de negocio en paralelo
     id_empresa = config.get("id_empresa")
     results = await asyncio.gather(
         fetch_horario_reuniones(id_empresa),
         fetch_nombres_productos_servicios(id_empresa),
+        fetch_contexto_negocio(id_empresa),
         return_exceptions=True,
     )
 
     horario_atencion = results[0] if not isinstance(results[0], Exception) else "No hay horario cargado."
     prods_servs = results[1] if not isinstance(results[1], Exception) else ([], [])
     nombres_productos, nombres_servicios = prods_servs
+    contexto_negocio = results[2] if not isinstance(results[2], Exception) else None
 
     variables["horario_atencion"] = horario_atencion
     variables["nombres_productos"] = nombres_productos
     variables["nombres_servicios"] = nombres_servicios
     variables["lista_productos_servicios"] = format_nombres_para_prompt(nombres_productos, nombres_servicios)
+    variables["contexto_negocio"] = contexto_negocio
 
     # Agregar historial
     variables["history"] = history or []
