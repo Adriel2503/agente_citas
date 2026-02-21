@@ -18,6 +18,7 @@ from .config import (
     API_CALENDAR_URL,
     API_AGENDAR_REUNION_URL,
     API_INFORMACION_URL,
+    API_PREGUNTAS_FRECUENTES_URL,
     TIMEZONE,
 )
 from .models import CitaConfig, ChatRequest, ChatResponse
@@ -38,6 +39,7 @@ __all__ = [
     "API_CALENDAR_URL",
     "API_AGENDAR_REUNION_URL",
     "API_INFORMACION_URL",
+    "API_PREGUNTAS_FRECUENTES_URL",
     "TIMEZONE",
     "CitaConfig",
     "ChatRequest",

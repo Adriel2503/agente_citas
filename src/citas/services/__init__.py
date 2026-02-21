@@ -10,6 +10,7 @@ from .horario_reuniones import fetch_horario_reuniones
 from .schedule_validator import ScheduleValidator
 from .productos_servicios_citas import fetch_nombres_productos_servicios, format_nombres_para_prompt
 from .busqueda_productos import buscar_productos_servicios, format_productos_para_respuesta
+from .preguntas_frecuentes import fetch_preguntas_frecuentes, format_preguntas_frecuentes_para_prompt
 
 __all__ = [
     "get_client",
@@ -22,4 +23,6 @@ __all__ = [
     "format_nombres_para_prompt",
     "buscar_productos_servicios",
     "format_productos_para_respuesta",
+    "fetch_preguntas_frecuentes",
+    "format_preguntas_frecuentes_para_prompt",
 ]
