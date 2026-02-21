@@ -4,7 +4,8 @@ Versión mejorada con logging, métricas, configuración centralizada y memoria 
 """
 
 import asyncio
-from typing import Any, Dict, Tuple
+import re
+from typing import Any, Dict, List, Tuple, Union
 from dataclasses import dataclass
 
 from cachetools import TTLCache
@@ -50,6 +51,40 @@ _agent_cache: TTLCache = TTLCache(
 # Crece con cada (id_empresa, personalidad) nuevo; se limpia cuando supera _LOCKS_CLEANUP_THRESHOLD.
 _agent_cache_locks: Dict[Tuple, asyncio.Lock] = {}
 _LOCKS_CLEANUP_THRESHOLD = 150  # 1.5x cache maxsize; si se supera, se eliminan locks huérfanos
+
+_IMAGE_URL_RE = re.compile(
+    r"https?://\S+\.(?:jpg|jpeg|png|gif|webp)(?:\?\S*)?",
+    re.IGNORECASE,
+)
+_MAX_IMAGES = 10  # límite de OpenAI Vision
+
+
+def _build_content(message: str) -> Union[str, List[dict]]:
+    """
+    Devuelve string si no hay URLs de imagen (Caso 1),
+    o lista de bloques OpenAI Vision si las hay (Casos 2-5).
+
+    Casos:
+      1. Solo texto         -> str
+      2. Solo 1 URL         -> [{image_url}]
+      3. Texto + 1 URL      -> [{text}, {image_url}]
+      4. Solo N URLs        -> [{image_url}, ...]
+      5. Texto + N URLs     -> [{text}, {image_url}, ...]
+    """
+    urls = _IMAGE_URL_RE.findall(message)
+    if not urls:
+        return message  # Caso 1: sin cambio
+
+    urls = urls[:_MAX_IMAGES]
+    text = _IMAGE_URL_RE.sub("", message).strip()
+
+    blocks: List[dict] = []
+    if text:
+        blocks.append({"type": "text", "text": text})
+    for url in urls:
+        blocks.append({"type": "image_url", "image_url": {"url": url}})
+    return blocks
+
 
 @dataclass
 class AgentContext:
@@ -345,7 +380,7 @@ async def process_cita_message(
                     result = await agent.ainvoke(
                         {
                             "messages": [
-                                {"role": "user", "content": message}
+                                {"role": "user", "content": _build_content(message)}
                             ]
                         },
                         config=config,
