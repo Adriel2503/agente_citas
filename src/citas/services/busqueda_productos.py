@@ -67,7 +67,7 @@ def _format_item(p: Dict[str, Any]) -> List[str]:
     linea_precio = _format_precio_linea(precio_str, es_servicio, unidad)
 
     lineas = [
-        f"*{nombre}*",
+        f"{nombre}",
         linea_precio,
         f"- Categoría: {categoria}",
         f"- Descripción: {descripcion}",
