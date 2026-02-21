@@ -41,11 +41,18 @@ def _format_precio(precio: Any) -> str:
         return "-"
 
 
+def _format_precio_linea(precio_str: str, es_servicio: bool, unidad: str) -> str:
+    """Línea de precio: solo monto para servicio; monto + unidad para producto."""
+    if es_servicio:
+        return f"- Precio: {precio_str}"
+    return f"- Precio: {precio_str} por {unidad}"
+
+
 def _format_item(p: Dict[str, Any]) -> List[str]:
     """
     Formato único para Producto y Servicio:
-    - Producto: Precio por unidad (nombre_unidad de API)
-    - Servicio: Precio por sesión
+    - Producto: Precio por unidad (nombre_unidad de API).
+    - Servicio: Solo precio, sin "por" ni unidad.
     Sin SKU en ninguno.
     """
     nombre = (p.get("nombre") or "-").strip()
@@ -55,13 +62,13 @@ def _format_item(p: Dict[str, Any]) -> List[str]:
 
     tipo = (p.get("nombre_tipo_producto") or "").strip().lower()
     es_servicio = tipo == "servicio"
-    unidad = "sesión" if es_servicio else (
-        (p.get("nombre_unidad") or "unidad").strip().lower()
-    )
+    unidad = (p.get("nombre_unidad") or "unidad").strip().lower() if not es_servicio else ""
+
+    linea_precio = _format_precio_linea(precio_str, es_servicio, unidad)
 
     lineas = [
         f"*{nombre}*",
-        f"- Precio: {precio_str} por {unidad}",
+        linea_precio,
         f"- Categoría: {categoria}",
         f"- Descripción: {descripcion}",
         "",
