@@ -12,6 +12,7 @@ from cachetools import TTLCache
 from langchain.agents import create_agent
 from langchain.chat_models import init_chat_model
 from langgraph.checkpoint.memory import InMemorySaver
+from pydantic import BaseModel
 
 try:
     from .. import config as app_config
@@ -29,6 +30,14 @@ except ImportError:
     from citas.prompts import build_citas_system_prompt
 
 logger = get_logger(__name__)
+
+
+class CitaStructuredResponse(BaseModel):
+    """Schema para response_format del agente. Siempre devuelve reply; url opcional."""
+
+    reply: str
+    url: str | None = None
+
 
 # Checkpointer global para memoria automática
 _checkpointer = InMemorySaver()
@@ -230,12 +239,13 @@ async def _get_agent(config: Dict[str, Any]):
             history=None,
         )
 
-        # Crear agente con API moderna
+        # Crear agente con API moderna (response_format: reply + url opcional)
         agent = create_agent(
             model=model,
             tools=AGENT_TOOLS,
             system_prompt=system_prompt,
             checkpointer=_checkpointer,
+            response_format=CitaStructuredResponse,
         )
 
         _agent_cache[cache_key] = agent
@@ -309,27 +319,27 @@ async def process_cita_message(
     message: str,
     session_id: int,
     context: Dict[str, Any]
-) -> str:
+) -> tuple[str, str | None]:
     """
     Procesa un mensaje del cliente sobre citas/reuniones usando LangChain 1.2+ Agent.
-    
+
     El agente tiene acceso a tools internas:
     - check_availability: Consulta horarios disponibles
     - create_booking: Crea cita/evento con validación real
-    
+
     La memoria es automática gracias al checkpointer (InMemorySaver).
-    
+
     Args:
         message: Mensaje del cliente
         session_id: ID de sesión (int, unificado con orquestador)
         context: Contexto adicional (config del bot, id_empresa, etc.)
-    
+
     Returns:
-        Respuesta del agente especializado
+        Tupla (reply, url). url es None cuando no hay medio que adjuntar.
     """
     # Validaciones rápidas FUERA del lock (no tocan estado compartido)
     if not message or not message.strip():
-        return "No recibí tu mensaje. ¿Podrías repetirlo?"
+        return ("No recibí tu mensaje. ¿Podrías repetirlo?", None)
 
     if session_id is None or session_id < 0:
         raise ValueError("session_id es requerido (entero no negativo)")
@@ -349,7 +359,7 @@ async def process_cita_message(
         except ValueError as e:
             logger.error("[AGENT] Error de contexto: %s", e)
             record_chat_error("context_error")
-            return f"Error de configuración: {str(e)}"
+            return (f"Error de configuración: {str(e)}", None)
 
         config_data = dict(context.get("config") or {})
         cita_config = CitaConfig(**config_data)
@@ -362,7 +372,7 @@ async def process_cita_message(
         except Exception as e:
             logger.error("[AGENT] Error creando agent: %s", e, exc_info=True)
             record_chat_error("agent_creation_error")
-            return "Disculpa, tuve un problema de configuración. ¿Podrías intentar nuevamente?"
+            return ("Disculpa, tuve un problema de configuración. ¿Podrías intentar nuevamente?", None)
 
         agent_context = _prepare_agent_context(context, session_id)
 
@@ -387,18 +397,24 @@ async def process_cita_message(
                         context=agent_context
                     )
 
-            messages = result.get("messages", [])
-            if messages:
-                last_message = messages[-1]
-                response_text = last_message.content if hasattr(last_message, 'content') else str(last_message)
+            structured = result.get("structured_response")
+            if isinstance(structured, CitaStructuredResponse):
+                reply = structured.reply or "Lo siento, no pude procesar tu solicitud."
+                url = structured.url if (structured.url and structured.url.strip()) else None
             else:
-                response_text = "Lo siento, no pude procesar tu solicitud."
+                messages = result.get("messages", [])
+                if messages:
+                    last_message = messages[-1]
+                    reply = last_message.content if hasattr(last_message, "content") else str(last_message)
+                else:
+                    reply = "Lo siento, no pude procesar tu solicitud."
+                url = None
 
-            logger.debug("[AGENT] Respuesta generada: %s...", response_text[:200])
+            logger.debug("[AGENT] Respuesta generada: %s...", (reply[:200], url))
 
         except Exception as e:
             logger.error("[AGENT] Error al ejecutar agent: %s", e, exc_info=True)
             record_chat_error("agent_execution_error")
-            return "Disculpa, tuve un problema al procesar tu mensaje. ¿Podrías intentar nuevamente?"
+            return ("Disculpa, tuve un problema al procesar tu mensaje. ¿Podrías intentar nuevamente?", None)
 
-    return response_text
+    return (reply, url)

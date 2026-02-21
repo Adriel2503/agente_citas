@@ -76,6 +76,7 @@ async def build_citas_system_prompt(
         System prompt formateado con historial.
     """
     variables = _apply_defaults(config)
+    variables["archivo_saludo"] = (config.get("archivo_saludo") or "").strip()
 
     # Fecha y hora actual en Perú (para que el agente sepa "hoy" y "mañana")
     now = _now_peru()

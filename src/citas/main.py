@@ -53,6 +53,7 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     reply: str
+    url: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -121,7 +122,7 @@ async def chat(req: ChatRequest) -> ChatResponse:
     logger.debug("[HTTP] Context keys: %s", list(context.keys()))
 
     try:
-        reply = await asyncio.wait_for(
+        reply, url = await asyncio.wait_for(
             process_cita_message(
                 message=req.message,
                 session_id=req.session_id,
@@ -132,17 +133,17 @@ async def chat(req: ChatRequest) -> ChatResponse:
 
         logger.info("[HTTP] Respuesta generada - Length: %s chars", len(reply))
         logger.debug("[HTTP] Reply: %s...", reply[:200])
-        return ChatResponse(reply=reply)
+        return ChatResponse(reply=reply, url=url)
 
     except asyncio.TimeoutError:
         error_msg = f"La solicitud tardó más de {app_config.CHAT_TIMEOUT}s. Por favor, intenta de nuevo."
         logger.error("[HTTP] Timeout en process_cita_message (CHAT_TIMEOUT=%s)", app_config.CHAT_TIMEOUT)
-        return ChatResponse(reply=error_msg)
+        return ChatResponse(reply=error_msg, url=None)
 
     except ValueError as e:
         error_msg = f"Error de configuración: {str(e)}"
         logger.error("[HTTP] %s", error_msg)
-        return ChatResponse(reply=error_msg)
+        return ChatResponse(reply=error_msg, url=None)
 
     except asyncio.CancelledError:
         raise
@@ -150,7 +151,7 @@ async def chat(req: ChatRequest) -> ChatResponse:
     except Exception as e:
         error_msg = f"Error procesando mensaje: {str(e)}"
         logger.error("[HTTP] %s", error_msg, exc_info=True)
-        return ChatResponse(reply=error_msg)
+        return ChatResponse(reply=error_msg, url=None)
 
 
 # ---------------------------------------------------------------------------
