@@ -3,6 +3,7 @@ Preguntas frecuentes: fetch desde API MaravIA (ws_preguntas_frecuentes.php) para
 Formato Pregunta/Respuesta para que el modelo entienda y use las FAQs.
 """
 
+import asyncio
 from typing import Any, Dict, List, Optional
 
 from cachetools import TTLCache
@@ -24,6 +25,9 @@ logger = get_logger(__name__)
 
 # Cache TTL por id_chatbot (1 hora), mismo criterio que contexto_negocio
 _preguntas_cache: TTLCache = TTLCache(maxsize=500, ttl=3600)
+
+# Lock por id_chatbot para evitar thundering herd (mismo patrón que horario_cache).
+_fetch_locks: Dict[Any, asyncio.Lock] = {}
 
 
 def format_preguntas_frecuentes_para_prompt(items: List[Dict[str, Any]]) -> str:
@@ -81,29 +85,39 @@ async def fetch_preguntas_frecuentes(id_chatbot: Optional[Any]) -> str:
     if preguntas_cb.is_open(id_chatbot):
         return ""
 
-    payload = {"id_chatbot": id_chatbot}
-    try:
-        logger.debug("[PREGUNTAS_FRECUENTES] Obteniendo FAQs id_chatbot=%s", id_chatbot)
-        data = await post_with_retry(app_config.API_PREGUNTAS_FRECUENTES_URL, json=payload)
-        if not data.get("success"):
-            logger.info("[PREGUNTAS_FRECUENTES] Respuesta recibida id_chatbot=%s, API sin éxito: %s", id_chatbot, data.get("error"))
+    # Serializar fetch por id_chatbot (thundering herd prevention)
+    lock = _fetch_locks.setdefault(id_chatbot, asyncio.Lock())
+    async with lock:
+        # Double-check: otra coroutine pudo llenar el cache mientras esperábamos
+        if id_chatbot in _preguntas_cache:
+            cached = _preguntas_cache[id_chatbot]
+            return cached if cached else ""
+
+        payload = {"id_chatbot": id_chatbot}
+        try:
+            logger.debug("[PREGUNTAS_FRECUENTES] Obteniendo FAQs id_chatbot=%s", id_chatbot)
+            data = await post_with_retry(app_config.API_PREGUNTAS_FRECUENTES_URL, json=payload)
+            if not data.get("success"):
+                logger.info("[PREGUNTAS_FRECUENTES] Respuesta recibida id_chatbot=%s, API sin éxito: %s", id_chatbot, data.get("error"))
+                return ""
+            items = data.get("preguntas_frecuentes") or []
+            if not items:
+                logger.info("[PREGUNTAS_FRECUENTES] Respuesta recibida id_chatbot=%s, sin preguntas", id_chatbot)
+                return ""
+            logger.info("[PREGUNTAS_FRECUENTES] Respuesta recibida id_chatbot=%s, %s preguntas", id_chatbot, len(items))
+            formatted = format_preguntas_frecuentes_para_prompt(items)
+            _preguntas_cache[id_chatbot] = formatted
+            preguntas_cb.record_success(id_chatbot)
+            return formatted
+        except httpx.TransportError as e:
+            preguntas_cb.record_failure(id_chatbot)
+            logger.info("[PREGUNTAS_FRECUENTES] No se pudo obtener FAQs id_chatbot=%s tras reintentos: %s", id_chatbot, e)
             return ""
-        items = data.get("preguntas_frecuentes") or []
-        if not items:
-            logger.info("[PREGUNTAS_FRECUENTES] Respuesta recibida id_chatbot=%s, sin preguntas", id_chatbot)
+        except Exception as e:
+            logger.info("[PREGUNTAS_FRECUENTES] No se pudo obtener FAQs id_chatbot=%s: %s", id_chatbot, e)
             return ""
-        logger.info("[PREGUNTAS_FRECUENTES] Respuesta recibida id_chatbot=%s, %s preguntas", id_chatbot, len(items))
-        formatted = format_preguntas_frecuentes_para_prompt(items)
-        _preguntas_cache[id_chatbot] = formatted
-        preguntas_cb.record_success(id_chatbot)
-        return formatted
-    except httpx.TransportError as e:
-        preguntas_cb.record_failure(id_chatbot)
-        logger.info("[PREGUNTAS_FRECUENTES] No se pudo obtener FAQs id_chatbot=%s tras reintentos: %s", id_chatbot, e)
-        return ""
-    except Exception as e:
-        logger.info("[PREGUNTAS_FRECUENTES] No se pudo obtener FAQs id_chatbot=%s: %s", id_chatbot, e)
-        return ""
+        finally:
+            _fetch_locks.pop(id_chatbot, None)
 
 
 __all__ = ["fetch_preguntas_frecuentes", "format_preguntas_frecuentes_para_prompt"]

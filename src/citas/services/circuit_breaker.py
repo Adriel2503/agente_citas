@@ -79,6 +79,10 @@ class CircuitBreaker:
             self._failures.pop(key, None)
             logger.debug("[CB:%s] Reset por éxito key=%s", self.name, key)
 
+    def any_open(self) -> bool:
+        """True si al menos un circuit está abierto. Usado por /health para reportar degradación."""
+        return any(count >= self._threshold for count in self._failures.values())
+
 
 # ---------------------------------------------------------------------------
 # Singletons compartidos entre servicios
@@ -100,4 +104,14 @@ preguntas_cb: CircuitBreaker = CircuitBreaker(
     reset_ttl=300,
 )
 
-__all__ = ["CircuitBreaker", "informacion_cb", "preguntas_cb"]
+# Key fija "global": ws_calendario.php es un servicio compartido de MaravIA.
+# Si cae, cae para todas las empresas. Fallos por empresa (Google Calendar)
+# llegan como success=false → no abren el circuit.
+# Usado por: booking
+calendario_cb: CircuitBreaker = CircuitBreaker(
+    name="ws_calendario",
+    threshold=3,
+    reset_ttl=300,
+)
+
+__all__ = ["CircuitBreaker", "informacion_cb", "preguntas_cb", "calendario_cb"]

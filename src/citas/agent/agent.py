@@ -133,7 +133,7 @@ def _validate_context(context: Dict[str, Any]) -> None:
     logger.debug("[AGENT] Context validated: id_empresa=%s", config_data.get("id_empresa"))
 
 
-async def _cleanup_stale_agent_locks(current_cache_key: Tuple) -> None:
+def _cleanup_stale_agent_locks(current_cache_key: Tuple) -> None:
     """
     Elimina locks de _agent_cache_locks cuyas claves ya no están en _agent_cache.
     Solo se ejecuta si el dict supera _LOCKS_CLEANUP_THRESHOLD.
@@ -147,21 +147,14 @@ async def _cleanup_stale_agent_locks(current_cache_key: Tuple) -> None:
             continue
         if key not in _agent_cache:
             lock = _agent_cache_locks.get(key)
-            if lock is None:
-                continue
-            try:
-                await asyncio.wait_for(lock.acquire(), timeout=0)
-            except asyncio.TimeoutError:
-                pass  # Lock en uso, no eliminar
-            else:
+            if lock is not None and not lock.locked():
                 del _agent_cache_locks[key]
-                lock.release()
                 removed += 1
     if removed:
         logger.debug("[AGENT] Limpieza de locks huérfanos: %s eliminados", removed)
 
 
-async def _cleanup_stale_session_locks(current_session_id: int) -> None:
+def _cleanup_stale_session_locks(current_session_id: int) -> None:
     """
     Elimina locks de _session_locks que no están en uso.
     Solo se ejecuta si el dict supera _SESSION_LOCKS_CLEANUP_THRESHOLD.
@@ -174,15 +167,8 @@ async def _cleanup_stale_session_locks(current_session_id: int) -> None:
         if sid == current_session_id:
             continue
         lock = _session_locks.get(sid)
-        if lock is None:
-            continue
-        try:
-            await asyncio.wait_for(lock.acquire(), timeout=0)
-        except asyncio.TimeoutError:
-            pass  # Lock en uso, no eliminar
-        else:
+        if lock is not None and not lock.locked():
             del _session_locks[sid]
-            lock.release()
             removed += 1
     if removed:
         logger.debug("[AGENT] Limpieza de session locks: %s eliminados", removed)
@@ -215,7 +201,7 @@ async def _get_agent(config: Dict[str, Any]):
         return _agent_cache[cache_key]
 
     # Slow path: serializar creación para evitar thundering herd
-    await _cleanup_stale_agent_locks(cache_key)
+    _cleanup_stale_agent_locks(cache_key)
     lock = _agent_cache_locks.setdefault(cache_key, asyncio.Lock())
     async with lock:
         # Double-check tras adquirir el lock (otra coroutine pudo haberlo creado)
@@ -351,7 +337,7 @@ async def process_cita_message(
 
     # Serializar requests concurrentes del mismo usuario para evitar condiciones
     # de carrera sobre el mismo thread_id del checkpointer (InMemorySaver).
-    await _cleanup_stale_session_locks(session_id)
+    _cleanup_stale_session_locks(session_id)
     lock = _session_locks.setdefault(session_id, asyncio.Lock())
     async with lock:
         # Validar contexto

@@ -12,6 +12,7 @@ from typing import Any, Dict
 
 import uvicorn
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from prometheus_client import make_asgi_app
 
@@ -21,12 +22,14 @@ try:
     from .logger import setup_logging, get_logger
     from .metrics import initialize_agent_info
     from .services.http_client import close_http_client
+    from .services.circuit_breaker import informacion_cb, preguntas_cb, calendario_cb
 except ImportError:
     from citas import config as app_config
     from citas.agent import process_cita_message
     from citas.logger import setup_logging, get_logger
     from citas.metrics import initialize_agent_info
     from citas.services.http_client import close_http_client
+    from citas.services.circuit_breaker import informacion_cb, preguntas_cb
 
 # Configurar logging antes de cualquier otra cosa
 log_level = getattr(logging, app_config.LOG_LEVEL.upper(), logging.INFO)
@@ -160,7 +163,22 @@ async def chat(req: ChatRequest) -> ChatResponse:
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "agent": "citas", "version": "2.0.0"}
+    issues = []
+
+    if not app_config.OPENAI_API_KEY:
+        issues.append("openai_api_key_missing")
+    if informacion_cb.any_open():
+        issues.append("informacion_api_degraded")
+    if preguntas_cb.any_open():
+        issues.append("preguntas_api_degraded")
+    if calendario_cb.any_open():
+        issues.append("calendario_api_degraded")
+
+    status = "degraded" if issues else "ok"
+    return JSONResponse(
+        status_code=503 if issues else 200,
+        content={"status": status, "agent": "citas", "version": "2.0.0", "issues": issues},
+    )
 
 
 # ---------------------------------------------------------------------------
