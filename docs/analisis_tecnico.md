@@ -107,7 +107,7 @@ checkpointer = await AsyncRedisSaver.from_conn_string(app_config.REDIS_URL)
 
 ---
 
-### C2 — `threading.Lock` mezclado con asyncio
+### C2 — `threading.Lock` mezclado con asyncio - OK
 
 **Archivo:** `services/schedule_validator.py:55-56`
 **Impacto:** Anti-patrón que puede causar deadlock si se agregan workers threaded o `run_in_executor`.
@@ -142,7 +142,7 @@ def _get_cached_schedule(id_empresa: int) -> Optional[Dict]:
 
 ---
 
-### C3 — Sin retry/backoff en la mayoría de servicios HTTP
+### C3 — Sin retry/backoff en la mayoría de servicios HTTP - OK
 
 **Impacto:** Un timeout transitorio de red hace fallar la creación de una cita sin reintento.
 
@@ -177,7 +177,7 @@ async def post_with_retry(url: str, json: dict) -> dict:
 
 ---
 
-### C4 — `fetch_horario_reuniones` sin caché propia + caché duplicada
+### C4 — `fetch_horario_reuniones` sin caché propia + caché duplicada - OK
 
 **Archivos:** `services/horario_reuniones.py` y `services/schedule_validator.py`
 **Impacto:** La misma API (`OBTENER_HORARIO_REUNIONES`) se llama **dos veces** con dos cachés separadas que nunca se comparten.
