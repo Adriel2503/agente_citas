@@ -44,8 +44,8 @@ def _format_precio(precio: Any) -> str:
 def _format_precio_linea(precio_str: str, es_servicio: bool, unidad: str) -> str:
     """Línea de precio: solo monto para servicio; monto + unidad para producto."""
     if es_servicio:
-        return f"- Precio: {precio_str}"
-    return f"- Precio: {precio_str} por {unidad}"
+        return f"- *Precio:* {precio_str}"
+    return f"- *Precio:* {precio_str} por {unidad}"
 
 
 def _format_item(p: Dict[str, Any]) -> List[str]:
@@ -67,10 +67,10 @@ def _format_item(p: Dict[str, Any]) -> List[str]:
     linea_precio = _format_precio_linea(precio_str, es_servicio, unidad)
 
     lineas = [
-        f"{nombre}",
+        f"*{nombre}*",
         linea_precio,
-        f"- Categoría: {categoria}",
-        f"- Descripción: {descripcion}",
+        f"- *Categoría:* {categoria}",
+        f"- *Descripción:* {descripcion}",
         "",
     ]
     return lineas
@@ -108,6 +108,10 @@ async def buscar_productos_servicios(
     if not busqueda or not str(busqueda).strip():
         return {"success": False, "productos": [], "error": "El término de búsqueda no puede estar vacío"}
 
+    logger.debug(
+        "[BUSQUEDA] Parámetros: id_empresa=%s, busqueda=%s, limite=%s",
+        id_empresa, busqueda.strip() if busqueda else "", limite,
+    )
     payload = {
         "codOpe": "BUSCAR_PRODUCTOS_SERVICIOS_CITAS",
         "id_empresa": id_empresa,
