@@ -21,7 +21,7 @@ from .config import (
     API_PREGUNTAS_FRECUENTES_URL,
     TIMEZONE,
 )
-from .models import CitaConfig, ChatRequest, ChatResponse
+from .models import CitaConfig
 
 __all__ = [
     "OPENAI_API_KEY",
@@ -42,6 +42,4 @@ __all__ = [
     "API_PREGUNTAS_FRECUENTES_URL",
     "TIMEZONE",
     "CitaConfig",
-    "ChatRequest",
-    "ChatResponse",
 ]
