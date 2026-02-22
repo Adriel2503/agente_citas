@@ -5,17 +5,16 @@ Formato Pregunta/Respuesta para que el modelo entienda y use las FAQs.
 
 from typing import Any, Dict, List, Optional
 
-import httpx
 from cachetools import TTLCache
 
 try:
     from .. import config as app_config
     from ..logger import get_logger
-    from .http_client import get_client
+    from .http_client import post_with_retry
 except ImportError:
     from citas import config as app_config
     from citas.logger import get_logger
-    from citas.services.http_client import get_client
+    from citas.services.http_client import post_with_retry
 
 logger = get_logger(__name__)
 
@@ -78,13 +77,7 @@ async def fetch_preguntas_frecuentes(id_chatbot: Optional[Any]) -> str:
     payload = {"id_chatbot": id_chatbot}
     try:
         logger.debug("[PREGUNTAS_FRECUENTES] Obteniendo FAQs id_chatbot=%s", id_chatbot)
-        client = get_client()
-        response = await client.post(
-            app_config.API_PREGUNTAS_FRECUENTES_URL,
-            json=payload,
-        )
-        response.raise_for_status()
-        data = response.json()
+        data = await post_with_retry(app_config.API_PREGUNTAS_FRECUENTES_URL, json=payload)
         if not data.get("success"):
             logger.info("[PREGUNTAS_FRECUENTES] Respuesta recibida id_chatbot=%s, API sin éxito: %s", id_chatbot, data.get("error"))
             return ""
@@ -96,7 +89,7 @@ async def fetch_preguntas_frecuentes(id_chatbot: Optional[Any]) -> str:
         formatted = format_preguntas_frecuentes_para_prompt(items)
         _preguntas_cache[id_chatbot] = formatted
         return formatted
-    except (httpx.TimeoutException, httpx.RequestError, Exception) as e:
+    except Exception as e:
         logger.info("[PREGUNTAS_FRECUENTES] No se pudo obtener FAQs id_chatbot=%s: %s", id_chatbot, e)
         logger.debug(
             "[PREGUNTAS_FRECUENTES] Error id_chatbot=%s: %s",

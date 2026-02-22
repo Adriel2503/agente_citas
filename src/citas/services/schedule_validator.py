@@ -15,12 +15,12 @@ try:
     from ..logger import get_logger
     from ..metrics import track_api_call, update_cache_stats
     from .. import config as app_config
-    from .http_client import get_client
+    from .http_client import post_with_retry
 except ImportError:
     from citas.logger import get_logger
     from citas.metrics import track_api_call, update_cache_stats
     from citas import config as app_config
-    from citas.services.http_client import get_client
+    from citas.services.http_client import post_with_retry
 
 logger = get_logger(__name__)
 
@@ -202,10 +202,7 @@ class ScheduleValidator:
             logger.debug("[SCHEDULE] JSON enviado a ws_informacion_ia.php (OBTENER_HORARIO_REUNIONES): %s", json.dumps(payload_horario, ensure_ascii=False, indent=2))
             try:
                 with track_api_call("obtener_horario"):
-                    client = get_client()
-                    response = await client.post(app_config.API_INFORMACION_URL, json=payload_horario)
-                    response.raise_for_status()
-                    data = response.json()
+                    data = await post_with_retry(app_config.API_INFORMACION_URL, json=payload_horario)
 
                 if self.log_create_booking_apis:
                     logger.info("  Respuesta: %s", json.dumps(data, ensure_ascii=False))
@@ -366,10 +363,7 @@ class ScheduleValidator:
             logger.debug("[AVAILABILITY] JSON enviado a ws_agendar_reunion.php (CONSULTAR_DISPONIBILIDAD): %s", json.dumps(payload, ensure_ascii=False, indent=2))
 
             with track_api_call("consultar_disponibilidad"):
-                client = get_client()
-                response = await client.post(app_config.API_AGENDAR_REUNION_URL, json=payload)
-                response.raise_for_status()
-                data = response.json()
+                data = await post_with_retry(app_config.API_AGENDAR_REUNION_URL, json=payload)
 
             if self.log_create_booking_apis:
                 logger.info("  Respuesta: %s", json.dumps(data, ensure_ascii=False))
@@ -550,10 +544,7 @@ class ScheduleValidator:
         logger.debug("[RECOMMENDATION] JSON enviado a ws_agendar_reunion.php (SUGERIR_HORARIOS): %s", json.dumps(payload, ensure_ascii=False, indent=2))
         try:
             with track_api_call("sugerir_horarios"):
-                client = get_client()
-                response = await client.post(app_config.API_AGENDAR_REUNION_URL, json=payload)
-                response.raise_for_status()
-                data = response.json()
+                data = await post_with_retry(app_config.API_AGENDAR_REUNION_URL, json=payload)
 
             if data.get("success"):
                 sugerencias = data.get("sugerencias", [])

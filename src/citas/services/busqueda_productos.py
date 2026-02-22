@@ -12,11 +12,11 @@ import httpx
 try:
     from .. import config as app_config
     from ..logger import get_logger
-    from .http_client import get_client
+    from .http_client import post_with_retry
 except ImportError:
     from citas import config as app_config
     from citas.logger import get_logger
-    from citas.services.http_client import get_client
+    from citas.services.http_client import post_with_retry
 
 logger = get_logger(__name__)
 
@@ -129,10 +129,7 @@ async def buscar_productos_servicios(
     )
 
     try:
-        client = get_client()
-        response = await client.post(app_config.API_INFORMACION_URL, json=payload)
-        response.raise_for_status()
-        data = response.json()
+        data = await post_with_retry(app_config.API_INFORMACION_URL, json=payload)
 
         if log_search_apis:
             logger.info("  Respuesta: %s", json.dumps(data, ensure_ascii=False))

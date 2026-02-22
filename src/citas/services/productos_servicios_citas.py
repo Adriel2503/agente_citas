@@ -12,11 +12,11 @@ import httpx
 try:
     from .. import config as app_config
     from ..logger import get_logger
-    from .http_client import get_client
+    from .http_client import post_with_retry
 except ImportError:
     from citas import config as app_config
     from citas.logger import get_logger
-    from citas.services.http_client import get_client
+    from citas.services.http_client import post_with_retry
 
 logger = get_logger(__name__)
 
@@ -46,10 +46,7 @@ async def _fetch_nombres(cod_ope: str, id_empresa: Any, max_items: int, response
     }
     try:
         logger.debug("[PRODUCTOS_SERVICIOS] POST %s - codOpe=%s", app_config.API_INFORMACION_URL, cod_ope)
-        client = get_client()
-        response = await client.post(app_config.API_INFORMACION_URL, json=payload)
-        response.raise_for_status()
-        data = response.json()
+        data = await post_with_retry(app_config.API_INFORMACION_URL, json=payload)
 
         if not data.get("success"):
             logger.warning("[PRODUCTOS_SERVICIOS] API no success para %s: %s", cod_ope, data.get("error"))

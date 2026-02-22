@@ -120,6 +120,11 @@ API_TIMEOUT: int = _get_int("API_TIMEOUT", 10, min_val=1, max_val=120)
 CHAT_TIMEOUT: int = _get_int("CHAT_TIMEOUT", 120, min_val=30, max_val=300)
 MAX_TOKENS: int = _get_int("MAX_TOKENS", 2048, min_val=1, max_val=128000)
 
+# Retry HTTP (aplica a todos los servicios de lectura vía post_with_retry)
+HTTP_RETRY_ATTEMPTS: int = _get_int("HTTP_RETRY_ATTEMPTS", 3, min_val=1, max_val=10)
+HTTP_RETRY_WAIT_MIN: int = _get_int("HTTP_RETRY_WAIT_MIN", 1, min_val=0, max_val=30)
+HTTP_RETRY_WAIT_MAX: int = _get_int("HTTP_RETRY_WAIT_MAX", 4, min_val=1, max_val=60)
+
 # ---------------------------------------------------------------------------
 # Cache
 # ---------------------------------------------------------------------------
