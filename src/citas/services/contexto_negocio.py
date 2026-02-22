@@ -37,7 +37,7 @@ async def fetch_contexto_negocio(id_empresa: Optional[Any]) -> Optional[str]:
     """
     Obtiene el contexto de negocio desde la API para inyectar en el system prompt.
     Incluye cache TTL (1 h) y circuit breaker (3 fallos → abierto 5 min).
-    El retry con backoff exponencial lo gestiona post_with_retry (hasta 3 intentos).
+    El retry con backoff exponencial lo gestiona post_with_retry (configurable vía HTTP_RETRY_ATTEMPTS).
 
     Args:
         id_empresa: ID de la empresa (int o str). Si es None, retorna None.

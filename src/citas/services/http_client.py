@@ -61,12 +61,15 @@ async def close_http_client() -> None:
 )
 async def post_with_retry(url: str, json: Dict[str, Any]) -> Dict[str, Any]:
     """
-    POST con retry automático para errores de red transitoria (hasta 3 intentos).
+    POST con retry automático para errores de red transitoria.
+
+    Intentos y tiempos de espera configurables vía:
+      HTTP_RETRY_ATTEMPTS  (default 3)
+      HTTP_RETRY_WAIT_MIN  (default 1s)
+      HTTP_RETRY_WAIT_MAX  (default 4s)
 
     Reintenta solo httpx.TransportError (timeouts, connect errors).
     NO reintenta httpx.HTTPStatusError (respuestas 4xx/5xx del servidor).
-
-    Backoff exponencial: 1s → 2s → 4s (máx).
 
     ADVERTENCIA: usar solo en operaciones de LECTURA idempotentes.
     Para escrituras (ej. CREAR_EVENTO) usar client.post() directamente.
