@@ -65,6 +65,7 @@ api_calls_total = Counter(
 chat_response_duration_seconds = Histogram(
     'agent_citas_chat_response_duration_seconds',
     'Tiempo de respuesta del chat en segundos',
+    ['status'],
     buckets=(0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 90.0)
 )
 
@@ -85,6 +86,7 @@ api_call_duration_seconds = Histogram(
 llm_call_duration_seconds = Histogram(
     'agent_citas_llm_call_duration_seconds',
     'Tiempo de llamadas al LLM en segundos',
+    ['status'],
     buckets=(0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 30.0, 60.0, 90.0)
 )
 
@@ -109,13 +111,14 @@ agent_info = Info(
 def track_chat_response():
     """Context manager para trackear duración de respuestas del chat."""
     start_time = time.time()
+    status = "success"
     try:
         yield
-    except BaseException:
+    except Exception:
+        status = "error"
         raise
-    else:
-        duration = time.time() - start_time
-        chat_response_duration_seconds.observe(duration)
+    finally:
+        chat_response_duration_seconds.labels(status=status).observe(time.time() - start_time)
 
 
 @contextmanager
@@ -158,13 +161,14 @@ def track_api_call(endpoint: str):
 def track_llm_call():
     """Context manager para trackear duración de llamadas al LLM."""
     start_time = time.time()
+    status = "success"
     try:
         yield
-    except BaseException:
+    except Exception:
+        status = "error"
         raise
-    else:
-        duration = time.time() - start_time
-        llm_call_duration_seconds.observe(duration)
+    finally:
+        llm_call_duration_seconds.labels(status=status).observe(time.time() - start_time)
 
 
 # ========== FUNCIONES DE UTILIDAD ==========

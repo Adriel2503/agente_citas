@@ -12,7 +12,7 @@ from typing import Any, Dict
 
 import uvicorn
 from fastapi import FastAPI
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from prometheus_client import make_asgi_app
 
 try:
@@ -46,7 +46,7 @@ initialize_agent_info(model=app_config.OPENAI_MODEL, version="2.0.0")
 # ---------------------------------------------------------------------------
 
 class ChatRequest(BaseModel):
-    message: str
+    message: str = Field(..., min_length=1, max_length=4096)
     session_id: int
     context: Dict[str, Any] | None = None
 

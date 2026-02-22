@@ -91,7 +91,7 @@ async def fetch_contexto_negocio(id_empresa: Optional[Any]) -> Optional[str]:
             _contexto_cache[id_empresa] = contexto
             _contexto_failures.pop(id_empresa, None)
             return contexto if contexto else None
-        except (httpx.TimeoutException, httpx.RequestError, Exception) as e:
+        except Exception as e:
             failed_by_exception = True
             logger.debug(
                 "[CONTEXTO_NEGOCIO] Error intento %d/%d id_empresa=%s: %s",

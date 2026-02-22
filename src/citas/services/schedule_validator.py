@@ -424,8 +424,8 @@ class ScheduleValidator:
         # 3. Combinar fecha y hora
         fecha_hora_cita = fecha.replace(hour=hora.hour, minute=hora.minute)
 
-        # 4. Validar que no sea en el pasado
-        ahora = datetime.now()
+        # 4. Validar que no sea en el pasado (zona horaria Lima, no la del servidor)
+        ahora = datetime.now(_ZONA_PERU).replace(tzinfo=None)
         if fecha_hora_cita <= ahora:
             return {"valid": False, "error": "La fecha y hora seleccionada ya pasó. Por favor elige una fecha y hora futura."}
 

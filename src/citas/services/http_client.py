@@ -24,7 +24,17 @@ def get_client() -> httpx.AsyncClient:
     global _client
     if _client is None:
         _client = httpx.AsyncClient(
-            timeout=app_config.API_TIMEOUT,
+            timeout=httpx.Timeout(
+                connect=5.0,
+                read=app_config.API_TIMEOUT,
+                write=5.0,
+                pool=2.0,
+            ),
+            limits=httpx.Limits(
+                max_connections=50,
+                max_keepalive_connections=20,
+                keepalive_expiry=30.0,
+            ),
             headers={"Content-Type": "application/json", "Accept": "application/json"},
         )
     return _client
