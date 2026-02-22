@@ -1,36 +1,29 @@
 """
 Contexto de negocio: fetch desde API MaravIA para el system prompt.
 Usa OBTENER_CONTEXTO_NEGOCIO (ws_informacion_ia.php).
-Cache TTL + circuit breaker. El retry con backoff lo provee post_with_retry.
+Cache TTL + circuit breaker compartido (informacion_cb). El retry lo provee post_with_retry.
 """
 
 from typing import Any, Optional
 
+import httpx
 from cachetools import TTLCache
 
 try:
     from .. import config as app_config
     from ..logger import get_logger
     from .http_client import post_with_retry
+    from .circuit_breaker import informacion_cb
 except ImportError:
     from citas import config as app_config
     from citas.logger import get_logger
     from citas.services.http_client import post_with_retry
+    from citas.services.circuit_breaker import informacion_cb
 
 logger = get_logger(__name__)
 
 # Cache TTL: mismo criterio que orquestador (max 500 empresas, 1 hora)
 _contexto_cache: TTLCache = TTLCache(maxsize=500, ttl=3600)  # id_empresa -> contexto (str)
-
-# Circuit breaker: TTL 5 min para auto-reset de fallos
-_contexto_failures: TTLCache = TTLCache(maxsize=500, ttl=300)  # id_empresa -> failure_count (int)
-_contexto_failure_threshold = 3
-
-
-def _is_contexto_circuit_open(id_empresa: Any) -> bool:
-    """True si el circuit breaker está abierto para esta empresa."""
-    failure_count = _contexto_failures.get(id_empresa, 0)
-    return failure_count >= _contexto_failure_threshold
 
 
 async def fetch_contexto_negocio(id_empresa: Optional[Any]) -> Optional[str]:
@@ -61,9 +54,8 @@ async def fetch_contexto_negocio(id_empresa: Optional[Any]) -> Optional[str]:
         )
         return contexto if contexto else None
 
-    # 2. Circuit breaker
-    if _is_contexto_circuit_open(id_empresa):
-        logger.warning("[CONTEXTO_NEGOCIO] Circuit abierto para id_empresa=%s", id_empresa)
+    # 2. Circuit breaker compartido (informacion_cb)
+    if informacion_cb.is_open(id_empresa):
         return None
 
     # 3. Fetch con retry automático (post_with_retry: hasta 3 intentos, backoff 1s→2s→4s)
@@ -93,17 +85,21 @@ async def fetch_contexto_negocio(id_empresa: Optional[Any]) -> Optional[str]:
             logger.info("[CONTEXTO_NEGOCIO] Respuesta recibida id_empresa=%s, contexto vacío", id_empresa)
 
         _contexto_cache[id_empresa] = contexto
-        _contexto_failures.pop(id_empresa, None)
+        informacion_cb.record_success(id_empresa)
         return contexto if contexto else None
 
-    except Exception as e:
-        # Incrementar circuit breaker solo en fallos de red/timeout (post_with_retry agotó reintentos)
-        logger.debug("[CONTEXTO_NEGOCIO] Fallos para id_empresa=%s: %s", id_empresa, e)
-        current = _contexto_failures.get(id_empresa, 0)
-        _contexto_failures[id_empresa] = current + 1
+    except httpx.TransportError as e:
+        # Solo TransportError abre el circuit (post_with_retry agotó reintentos de red)
+        informacion_cb.record_failure(id_empresa)
         logger.info(
-            "[CONTEXTO_NEGOCIO] No se pudo obtener contexto id_empresa=%s tras reintentos",
-            id_empresa
+            "[CONTEXTO_NEGOCIO] No se pudo obtener contexto id_empresa=%s tras reintentos: %s",
+            id_empresa, e,
+        )
+        return None
+    except Exception as e:
+        logger.info(
+            "[CONTEXTO_NEGOCIO] No se pudo obtener contexto id_empresa=%s: %s",
+            id_empresa, e,
         )
         return None
 

@@ -50,11 +50,12 @@ _session_locks: Dict[int, asyncio.Lock] = {}
 _SESSION_LOCKS_CLEANUP_THRESHOLD = 500  # multiempresa: muchas sesiones; limpieza periódica
 
 # Cache de agentes compilados: clave = (id_empresa, personalidad).
-# TTL acoplado al cache de horarios: cuando el horario caduca, el agente también,
-# garantizando que el próximo mensaje recibe un prompt con datos frescos.
+# TTL independiente del cache de horarios: el system prompt (contexto negocio, FAQs,
+# productos) cambia raramente → TTL largo (default 60 min).
+# La validación de horario usa horario_cache directamente, siempre fresca.
 _agent_cache: TTLCache = TTLCache(
     maxsize=100,
-    ttl=app_config.SCHEDULE_CACHE_TTL_MINUTES * 60,
+    ttl=app_config.AGENT_CACHE_TTL_MINUTES * 60,
 )
 # Un lock por cache_key para evitar thundering herd al crear el agente por primera vez.
 # Crece con cada (id_empresa, personalidad) nuevo; se limpia cuando supera _LOCKS_CLEANUP_THRESHOLD.
@@ -253,7 +254,7 @@ async def _get_agent(config: Dict[str, Any]):
             "[AGENT] Agente cacheado - id_empresa=%s, Tools: %s, TTL: %ss",
             cache_key[0],
             len(AGENT_TOOLS),
-            app_config.SCHEDULE_CACHE_TTL_MINUTES * 60,
+            app_config.AGENT_CACHE_TTL_MINUTES * 60,
         )
         return agent
 

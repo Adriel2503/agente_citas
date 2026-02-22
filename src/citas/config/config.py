@@ -132,6 +132,9 @@ HTTP_RETRY_WAIT_MAX: int = _get_int("HTTP_RETRY_WAIT_MAX", 4, min_val=1, max_val
 SCHEDULE_CACHE_TTL_MINUTES: int = _get_int(
     "SCHEDULE_CACHE_TTL_MINUTES", 5, min_val=1, max_val=1440
 )
+AGENT_CACHE_TTL_MINUTES: int = _get_int(
+    "AGENT_CACHE_TTL_MINUTES", 60, min_val=5, max_val=1440
+)
 
 # ---------------------------------------------------------------------------
 # APIs MaravIA (calendario, agendar reunión, información/horarios)

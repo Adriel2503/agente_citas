@@ -13,10 +13,12 @@ try:
     from .. import config as app_config
     from ..logger import get_logger
     from .http_client import post_with_retry
+    from .circuit_breaker import informacion_cb
 except ImportError:
     from citas import config as app_config
     from citas.logger import get_logger
     from citas.services.http_client import post_with_retry
+    from citas.services.circuit_breaker import informacion_cb
 
 logger = get_logger(__name__)
 
@@ -108,6 +110,9 @@ async def buscar_productos_servicios(
     if not busqueda or not str(busqueda).strip():
         return {"success": False, "productos": [], "error": "El término de búsqueda no puede estar vacío"}
 
+    if informacion_cb.is_open(id_empresa):
+        return {"success": False, "productos": [], "error": "Servicio no disponible temporalmente. Intenta de nuevo en unos minutos."}
+
     logger.debug(
         "[BUSQUEDA] Parámetros: id_empresa=%s, busqueda=%s, limite=%s",
         id_empresa, busqueda.strip() if busqueda else "", limite,
@@ -139,14 +144,13 @@ async def buscar_productos_servicios(
             return {"success": False, "productos": [], "error": error_msg}
 
         productos = data.get("productos", [])
+        informacion_cb.record_success(id_empresa)
         return {"success": True, "productos": productos, "error": None}
 
-    except httpx.TimeoutException:
-        logger.warning("[BUSQUEDA] Timeout al buscar productos")
+    except httpx.TransportError as e:
+        informacion_cb.record_failure(id_empresa)
+        logger.warning("[BUSQUEDA] Error de red al buscar productos: %s", e)
         return {"success": False, "productos": [], "error": "La búsqueda tardó demasiado. Intenta de nuevo."}
-    except httpx.RequestError as e:
-        logger.warning("[BUSQUEDA] Error de conexión: %s", e)
-        return {"success": False, "productos": [], "error": str(e)}
     except Exception as e:
         logger.exception("[BUSQUEDA] Error inesperado: %s", e)
         return {"success": False, "productos": [], "error": str(e)}

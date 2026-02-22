@@ -13,10 +13,12 @@ try:
     from .. import config as app_config
     from ..logger import get_logger
     from .http_client import post_with_retry
+    from .circuit_breaker import informacion_cb
 except ImportError:
     from citas import config as app_config
     from citas.logger import get_logger
     from citas.services.http_client import post_with_retry
+    from citas.services.circuit_breaker import informacion_cb
 
 logger = get_logger(__name__)
 
@@ -40,6 +42,9 @@ async def _fetch_nombres(cod_ope: str, id_empresa: Any, max_items: int, response
     if id_empresa is None or id_empresa == "":
         return []
 
+    if informacion_cb.is_open(id_empresa):
+        return []
+
     payload = {
         "codOpe": cod_ope,
         "id_empresa": id_empresa,
@@ -59,13 +64,12 @@ async def _fetch_nombres(cod_ope: str, id_empresa: Any, max_items: int, response
                 nombres.append(str(item["nombre"]).strip())
             elif isinstance(item, str):
                 nombres.append(item.strip())
+        informacion_cb.record_success(id_empresa)
         return nombres
 
-    except httpx.TimeoutException:
-        logger.warning("[PRODUCTOS_SERVICIOS] Timeout al obtener %s", cod_ope)
-        return []
-    except httpx.RequestError as e:
-        logger.warning("[PRODUCTOS_SERVICIOS] Error al obtener %s: %s", cod_ope, e)
+    except httpx.TransportError as e:
+        informacion_cb.record_failure(id_empresa)
+        logger.warning("[PRODUCTOS_SERVICIOS] Error de red al obtener %s: %s", cod_ope, e)
         return []
     except Exception as e:
         logger.warning("[PRODUCTOS_SERVICIOS] Error inesperado %s: %s", cod_ope, e)

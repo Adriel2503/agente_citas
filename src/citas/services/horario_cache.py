@@ -12,6 +12,7 @@ hace el HTTP call; las demás esperan el lock y encuentran el cache ya lleno.
 import asyncio
 from typing import Any, Dict, Optional
 
+import httpx
 from cachetools import TTLCache
 
 try:
@@ -19,11 +20,13 @@ try:
     from ..logger import get_logger
     from ..metrics import track_api_call, update_cache_stats
     from .http_client import post_with_retry
+    from .circuit_breaker import informacion_cb
 except ImportError:
     from citas import config as app_config
     from citas.logger import get_logger
     from citas.metrics import track_api_call, update_cache_stats
     from citas.services.http_client import post_with_retry
+    from citas.services.circuit_breaker import informacion_cb
 
 logger = get_logger(__name__)
 
@@ -61,14 +64,18 @@ async def get_horario(id_empresa: Optional[Any]) -> Optional[Dict[str, Any]]:
         logger.debug("[HORARIO_CACHE] Cache hit id_empresa=%s", id_empresa)
         return _horario_cache[id_empresa]
 
-    # 2. Cache miss: serializar fetch por id_empresa (thundering herd prevention)
+    # 2. Circuit breaker compartido (informacion_cb)
+    if informacion_cb.is_open(id_empresa):
+        return None
+
+    # 3. Cache miss: serializar fetch por id_empresa (thundering herd prevention)
     lock = _fetch_locks.setdefault(id_empresa, asyncio.Lock())
     async with lock:
-        # 3. Double-check: otra coroutine pudo llenar el cache mientras esperábamos
+        # 4. Double-check: otra coroutine pudo llenar el cache mientras esperábamos
         if id_empresa in _horario_cache:
             return _horario_cache[id_empresa]
 
-        # 4. Fetch real — solo una coroutine por id_empresa llega aquí a la vez
+        # 5. Fetch real — solo una coroutine por id_empresa llega aquí a la vez
         payload = {
             "codOpe": "OBTENER_HORARIO_REUNIONES",
             "id_empresa": id_empresa,
@@ -82,6 +89,7 @@ async def get_horario(id_empresa: Optional[Any]) -> Optional[Dict[str, Any]]:
                 horario = data["horario_reuniones"]
                 _horario_cache[id_empresa] = horario
                 update_cache_stats("schedule", len(_horario_cache))
+                informacion_cb.record_success(id_empresa)
                 logger.debug("[HORARIO_CACHE] Horario cacheado id_empresa=%s", id_empresa)
                 return horario
 
@@ -91,12 +99,25 @@ async def get_horario(id_empresa: Optional[Any]) -> Optional[Dict[str, Any]]:
             )
             return None
 
+        except httpx.TransportError as e:
+            # Solo TransportError abre el circuit (post_with_retry agotó reintentos de red)
+            informacion_cb.record_failure(id_empresa)
+            logger.info(
+                "[HORARIO_CACHE] No se pudo obtener horario id_empresa=%s tras reintentos: %s",
+                id_empresa, e,
+            )
+            return None
         except Exception as e:
             logger.info(
                 "[HORARIO_CACHE] No se pudo obtener horario id_empresa=%s: %s",
                 id_empresa, e,
             )
             return None
+        finally:
+            # Elimina el lock una vez terminado el fetch (éxito o fallo).
+            # Coroutines que ya capturaron la referencia local siguen funcionando
+            # porque su variable `lock` mantiene el objeto vivo.
+            _fetch_locks.pop(id_empresa, None)
 
 
 __all__ = ["get_horario", "clear_horario_cache"]
