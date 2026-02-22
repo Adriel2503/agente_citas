@@ -192,10 +192,10 @@ async def _get_agent(config: Dict[str, Any]):
     """
     Devuelve el agente compilado para la combinación (id_empresa, personalidad).
 
-    Utiliza TTLCache para evitar recrear el cliente OpenAI, las 2 HTTP calls
+    Utiliza TTLCache para evitar recrear el cliente OpenAI, las HTTP calls
     del prompt y la compilación del grafo LangGraph en cada mensaje. El TTL
-    está acoplado a SCHEDULE_CACHE_TTL_MINUTES para que los datos del prompt
-    (horario, productos) se refresquen al mismo tiempo que el cache de horarios.
+    se gobierna con AGENT_CACHE_TTL_MINUTES (default 60 min), independiente
+    del cache de horarios (SCHEDULE_CACHE_TTL_MINUTES).
 
     Incluye doble verificación con asyncio.Lock por cache_key para serializar
     la primera creación cuando múltiples sesiones de la misma empresa llegan
