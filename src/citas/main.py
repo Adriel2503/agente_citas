@@ -29,7 +29,7 @@ except ImportError:
     from citas.logger import setup_logging, get_logger
     from citas.metrics import initialize_agent_info
     from citas.services.http_client import close_http_client
-    from citas.services.circuit_breaker import informacion_cb, preguntas_cb
+    from citas.services.circuit_breaker import informacion_cb, preguntas_cb, calendario_cb
 
 # Configurar logging antes de cualquier otra cosa
 log_level = getattr(logging, app_config.LOG_LEVEL.upper(), logging.INFO)
