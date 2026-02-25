@@ -12,21 +12,22 @@ hace el HTTP call; las demás esperan el lock y encuentran el cache ya lleno.
 import asyncio
 from typing import Any, Dict, Optional
 
-import httpx
 from cachetools import TTLCache
 
 try:
     from .. import config as app_config
     from ..logger import get_logger
     from ..metrics import track_api_call, update_cache_stats
-    from .http_client import post_with_retry
+    from .http_client import post_with_logging
     from .circuit_breaker import informacion_cb
+    from ._resilience import resilient_call
 except ImportError:
     from citas import config as app_config
     from citas.logger import get_logger
     from citas.metrics import track_api_call, update_cache_stats
-    from citas.services.http_client import post_with_retry
+    from citas.services.http_client import post_with_logging
     from citas.services.circuit_breaker import informacion_cb
+    from citas.services._resilience import resilient_call
 
 logger = get_logger(__name__)
 
@@ -64,7 +65,7 @@ async def get_horario(id_empresa: Optional[Any]) -> Optional[Dict[str, Any]]:
         logger.debug("[HORARIO_CACHE] Cache hit id_empresa=%s", id_empresa)
         return _horario_cache[id_empresa]
 
-    # 2. Circuit breaker compartido (informacion_cb)
+    # 2. Fast reject: evita adquirir el lock cuando el circuito está abierto
     if informacion_cb.is_open(id_empresa):
         return None
 
@@ -81,15 +82,23 @@ async def get_horario(id_empresa: Optional[Any]) -> Optional[Dict[str, Any]]:
             "id_empresa": id_empresa,
         }
         logger.debug("[HORARIO_CACHE] Fetching horario id_empresa=%s", id_empresa)
-        try:
+
+        async def _fetcher():
             with track_api_call("obtener_horario"):
-                data = await post_with_retry(app_config.API_INFORMACION_URL, json=payload)
+                return await post_with_logging(app_config.API_INFORMACION_URL, payload)
+
+        try:
+            data = await resilient_call(
+                _fetcher,
+                cb=informacion_cb,
+                circuit_key=id_empresa,
+                service_name="HORARIO_CACHE",
+            )
 
             if data.get("success") and data.get("horario_reuniones"):
                 horario = data["horario_reuniones"]
                 _horario_cache[id_empresa] = horario
                 update_cache_stats("schedule", len(_horario_cache))
-                informacion_cb.record_success(id_empresa)
                 logger.debug("[HORARIO_CACHE] Horario cacheado id_empresa=%s", id_empresa)
                 return horario
 
@@ -99,14 +108,6 @@ async def get_horario(id_empresa: Optional[Any]) -> Optional[Dict[str, Any]]:
             )
             return None
 
-        except httpx.TransportError as e:
-            # Solo TransportError abre el circuit (post_with_retry agotó reintentos de red)
-            informacion_cb.record_failure(id_empresa)
-            logger.info(
-                "[HORARIO_CACHE] No se pudo obtener horario id_empresa=%s tras reintentos: %s",
-                id_empresa, e,
-            )
-            return None
         except Exception as e:
             logger.info(
                 "[HORARIO_CACHE] No se pudo obtener horario id_empresa=%s: %s",

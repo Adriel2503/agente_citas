@@ -8,18 +8,18 @@ from typing import Any, Dict, List, Optional
 
 from cachetools import TTLCache
 
-import httpx
-
 try:
     from .. import config as app_config
     from ..logger import get_logger
-    from .http_client import post_with_retry
+    from .http_client import post_with_logging
     from .circuit_breaker import preguntas_cb
+    from ._resilience import resilient_call
 except ImportError:
     from citas import config as app_config
     from citas.logger import get_logger
-    from citas.services.http_client import post_with_retry
+    from citas.services.http_client import post_with_logging
     from citas.services.circuit_breaker import preguntas_cb
+    from citas.services._resilience import resilient_call
 
 logger = get_logger(__name__)
 
@@ -82,6 +82,7 @@ async def fetch_preguntas_frecuentes(id_chatbot: Optional[Any]) -> str:
         logger.info("[PREGUNTAS_FRECUENTES] Respuesta recibida id_chatbot=%s (cache)", id_chatbot)
         return cached if cached else ""
 
+    # Fast reject: evita adquirir el lock cuando el circuito está abierto
     if preguntas_cb.is_open(id_chatbot):
         return ""
 
@@ -96,7 +97,12 @@ async def fetch_preguntas_frecuentes(id_chatbot: Optional[Any]) -> str:
         payload = {"id_chatbot": id_chatbot}
         try:
             logger.debug("[PREGUNTAS_FRECUENTES] Obteniendo FAQs id_chatbot=%s", id_chatbot)
-            data = await post_with_retry(app_config.API_PREGUNTAS_FRECUENTES_URL, json=payload)
+            data = await resilient_call(
+                lambda: post_with_logging(app_config.API_PREGUNTAS_FRECUENTES_URL, payload),
+                cb=preguntas_cb,
+                circuit_key=id_chatbot,
+                service_name="PREGUNTAS_FRECUENTES",
+            )
             if not data.get("success"):
                 logger.info("[PREGUNTAS_FRECUENTES] Respuesta recibida id_chatbot=%s, API sin éxito: %s", id_chatbot, data.get("error"))
                 return ""
@@ -107,12 +113,7 @@ async def fetch_preguntas_frecuentes(id_chatbot: Optional[Any]) -> str:
             logger.info("[PREGUNTAS_FRECUENTES] Respuesta recibida id_chatbot=%s, %s preguntas", id_chatbot, len(items))
             formatted = format_preguntas_frecuentes_para_prompt(items)
             _preguntas_cache[id_chatbot] = formatted
-            preguntas_cb.record_success(id_chatbot)
             return formatted
-        except httpx.TransportError as e:
-            preguntas_cb.record_failure(id_chatbot)
-            logger.info("[PREGUNTAS_FRECUENTES] No se pudo obtener FAQs id_chatbot=%s tras reintentos: %s", id_chatbot, e)
-            return ""
         except Exception as e:
             logger.info("[PREGUNTAS_FRECUENTES] No se pudo obtener FAQs id_chatbot=%s: %s", id_chatbot, e)
             return ""

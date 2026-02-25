@@ -73,14 +73,14 @@ tool_execution_duration_seconds = Histogram(
     'agent_citas_tool_execution_duration_seconds',
     'Tiempo de ejecución de tools en segundos',
     ['tool_name'],
-    buckets=(0.1, 0.5, 1.0, 2.0, 5.0, 10.0)
+    buckets=(0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 30.0)
 )
 
 api_call_duration_seconds = Histogram(
     'agent_citas_api_call_duration_seconds',
     'Tiempo de llamadas a API en segundos',
     ['endpoint'],
-    buckets=(0.1, 0.5, 1.0, 2.0, 5.0, 10.0)
+    buckets=(0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0)
 )
 
 llm_call_duration_seconds = Histogram(
@@ -110,7 +110,7 @@ agent_info = Info(
 @contextmanager
 def track_chat_response():
     """Context manager para trackear duración de respuestas del chat."""
-    start_time = time.time()
+    start_time = time.perf_counter()
     status = "success"
     try:
         yield
@@ -118,13 +118,13 @@ def track_chat_response():
         status = "error"
         raise
     finally:
-        chat_response_duration_seconds.labels(status=status).observe(time.time() - start_time)
+        chat_response_duration_seconds.labels(status=status).observe(time.perf_counter() - start_time)
 
 
 @contextmanager
 def track_tool_execution(tool_name: str):
     """Context manager para trackear duración de ejecución de tools."""
-    start_time = time.time()
+    start_time = time.perf_counter()
     tool_calls_total.labels(tool_name=tool_name).inc()
     try:
         yield
@@ -135,14 +135,14 @@ def track_tool_execution(tool_name: str):
         ).inc()
         raise
     else:
-        duration = time.time() - start_time
+        duration = time.perf_counter() - start_time
         tool_execution_duration_seconds.labels(tool_name=tool_name).observe(duration)
 
 
 @contextmanager
 def track_api_call(endpoint: str):
     """Context manager para trackear duración de llamadas a API."""
-    start_time = time.time()
+    start_time = time.perf_counter()
     status = "unknown"
     try:
         yield
@@ -151,7 +151,7 @@ def track_api_call(endpoint: str):
         status = f"error_{type(e).__name__}"
         raise
     else:
-        duration = time.time() - start_time
+        duration = time.perf_counter() - start_time
         api_call_duration_seconds.labels(endpoint=endpoint).observe(duration)
     finally:
         api_calls_total.labels(endpoint=endpoint, status=status).inc()
@@ -160,7 +160,7 @@ def track_api_call(endpoint: str):
 @contextmanager
 def track_llm_call():
     """Context manager para trackear duración de llamadas al LLM."""
-    start_time = time.time()
+    start_time = time.perf_counter()
     status = "success"
     try:
         yield
@@ -168,7 +168,7 @@ def track_llm_call():
         status = "error"
         raise
     finally:
-        llm_call_duration_seconds.labels(status=status).observe(time.time() - start_time)
+        llm_call_duration_seconds.labels(status=status).observe(time.perf_counter() - start_time)
 
 
 # ========== FUNCIONES DE UTILIDAD ==========

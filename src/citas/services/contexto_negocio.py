@@ -7,19 +7,20 @@ Cache TTL + circuit breaker compartido (informacion_cb). El retry lo provee post
 import asyncio
 from typing import Any, Dict, Optional
 
-import httpx
 from cachetools import TTLCache
 
 try:
     from .. import config as app_config
     from ..logger import get_logger
-    from .http_client import post_with_retry
+    from .http_client import post_with_logging
     from .circuit_breaker import informacion_cb
+    from ._resilience import resilient_call
 except ImportError:
     from citas import config as app_config
     from citas.logger import get_logger
-    from citas.services.http_client import post_with_retry
+    from citas.services.http_client import post_with_logging
     from citas.services.circuit_breaker import informacion_cb
+    from citas.services._resilience import resilient_call
 
 logger = get_logger(__name__)
 
@@ -58,7 +59,7 @@ async def fetch_contexto_negocio(id_empresa: Optional[Any]) -> Optional[str]:
         )
         return contexto if contexto else None
 
-    # 2. Circuit breaker compartido (informacion_cb)
+    # 2. Fast reject: evita adquirir el lock cuando el circuito está abierto
     if informacion_cb.is_open(id_empresa):
         return None
 
@@ -70,7 +71,6 @@ async def fetch_contexto_negocio(id_empresa: Optional[Any]) -> Optional[str]:
             contexto = _contexto_cache[id_empresa]
             return contexto if contexto else None
 
-        # Fetch con retry automático (post_with_retry: hasta 3 intentos, backoff 1s→2s→4s)
         payload = {
             "codOpe": "OBTENER_CONTEXTO_NEGOCIO",
             "id_empresa": id_empresa,
@@ -78,7 +78,12 @@ async def fetch_contexto_negocio(id_empresa: Optional[Any]) -> Optional[str]:
         logger.debug("[CONTEXTO_NEGOCIO] Obteniendo contexto id_empresa=%s", id_empresa)
 
         try:
-            data = await post_with_retry(app_config.API_INFORMACION_URL, json=payload)
+            data = await resilient_call(
+                lambda: post_with_logging(app_config.API_INFORMACION_URL, payload),
+                cb=informacion_cb,
+                circuit_key=id_empresa,
+                service_name="CONTEXTO_NEGOCIO",
+            )
 
             if not data.get("success"):
                 logger.info(
@@ -97,17 +102,8 @@ async def fetch_contexto_negocio(id_empresa: Optional[Any]) -> Optional[str]:
                 logger.info("[CONTEXTO_NEGOCIO] Respuesta recibida id_empresa=%s, contexto vacío", id_empresa)
 
             _contexto_cache[id_empresa] = contexto
-            informacion_cb.record_success(id_empresa)
             return contexto if contexto else None
 
-        except httpx.TransportError as e:
-            # Solo TransportError abre el circuit (post_with_retry agotó reintentos de red)
-            informacion_cb.record_failure(id_empresa)
-            logger.info(
-                "[CONTEXTO_NEGOCIO] No se pudo obtener contexto id_empresa=%s tras reintentos: %s",
-                id_empresa, e,
-            )
-            return None
         except Exception as e:
             logger.info(
                 "[CONTEXTO_NEGOCIO] No se pudo obtener contexto id_empresa=%s: %s",

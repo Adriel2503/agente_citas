@@ -104,6 +104,15 @@ async def build_citas_system_prompt(
         return_exceptions=True,
     )
 
+    if isinstance(results[0], Exception):
+        logger.warning("[PROMPT] horario_reuniones falló: %s - %s", type(results[0]).__name__, results[0])
+    if isinstance(results[1], Exception):
+        logger.warning("[PROMPT] productos_servicios falló: %s - %s", type(results[1]).__name__, results[1])
+    if isinstance(results[2], Exception):
+        logger.warning("[PROMPT] contexto_negocio falló: %s - %s", type(results[2]).__name__, results[2])
+    if isinstance(results[3], Exception):
+        logger.warning("[PROMPT] preguntas_frecuentes falló: %s - %s", type(results[3]).__name__, results[3])
+
     horario_atencion = results[0] if not isinstance(results[0], Exception) else "No hay horario cargado."
     prods_servs = results[1] if not isinstance(results[1], Exception) else ([], [])
     nombres_productos, nombres_servicios = prods_servs

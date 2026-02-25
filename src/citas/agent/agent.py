@@ -42,6 +42,11 @@ class CitaStructuredResponse(BaseModel):
 # Checkpointer global para memoria automática
 _checkpointer = InMemorySaver()
 
+# Modelo LLM: singleton compartido por todas las empresas.
+# init_chat_model es síncrono; no hay riesgo de race condition en asyncio single-thread.
+# Todas las empresas usan el mismo modelo (config desde variables de entorno).
+_model = None
+
 # Un lock por session_id para serializar requests concurrentes de la misma sesión.
 # Evita que dos mensajes del mismo usuario (doble-click / reintento) ejecuten
 # agent.ainvoke sobre el mismo thread_id del checkpointer en paralelo.
@@ -54,13 +59,13 @@ _SESSION_LOCKS_CLEANUP_THRESHOLD = 500  # multiempresa: muchas sesiones; limpiez
 # productos) cambia raramente → TTL largo (default 60 min).
 # La validación de horario usa horario_cache directamente, siempre fresca.
 _agent_cache: TTLCache = TTLCache(
-    maxsize=100,
+    maxsize=500,
     ttl=app_config.AGENT_CACHE_TTL_MINUTES * 60,
 )
 # Un lock por cache_key para evitar thundering herd al crear el agente por primera vez.
 # Crece con cada (id_empresa, personalidad) nuevo; se limpia cuando supera _LOCKS_CLEANUP_THRESHOLD.
 _agent_cache_locks: Dict[Tuple, asyncio.Lock] = {}
-_LOCKS_CLEANUP_THRESHOLD = 150  # 1.5x cache maxsize; si se supera, se eliminan locks huérfanos
+_LOCKS_CLEANUP_THRESHOLD = 750  # 1.5x cache maxsize; si se supera, se eliminan locks huérfanos
 
 _IMAGE_URL_RE = re.compile(
     r"https?://\S+\.(?:jpg|jpeg|png|gif|webp)(?:\?\S*)?",
@@ -174,6 +179,26 @@ def _cleanup_stale_session_locks(current_session_id: int) -> None:
         logger.debug("[AGENT] Limpieza de session locks: %s eliminados", removed)
 
 
+def _get_model():
+    """
+    Retorna el modelo LLM singleton, creándolo en la primera llamada.
+    init_chat_model es síncrono → no hay race condition en asyncio single-thread.
+    Compartido por todas las empresas: la config viene de variables de entorno,
+    es idéntica para todos.
+    """
+    global _model
+    if _model is None:
+        logger.info("[AGENT] Inicializando modelo LLM: %s", app_config.OPENAI_MODEL)
+        _model = init_chat_model(
+            f"openai:{app_config.OPENAI_MODEL}",
+            api_key=app_config.OPENAI_API_KEY,
+            temperature=app_config.OPENAI_TEMPERATURE,
+            max_tokens=app_config.MAX_TOKENS,
+            timeout=app_config.OPENAI_TIMEOUT,
+        )
+    return _model
+
+
 async def _get_agent(config: Dict[str, Any]):
     """
     Devuelve el agente compilado para la combinación (id_empresa, personalidad).
@@ -211,14 +236,7 @@ async def _get_agent(config: Dict[str, Any]):
 
         logger.debug("[AGENT] Creando agente con LangChain 1.2+ API - id_empresa=%s", cache_key[0])
 
-        # Inicializar modelo
-        model = init_chat_model(
-            f"openai:{app_config.OPENAI_MODEL}",
-            api_key=app_config.OPENAI_API_KEY,
-            temperature=app_config.OPENAI_TEMPERATURE,
-            max_tokens=app_config.MAX_TOKENS,
-            timeout=app_config.OPENAI_TIMEOUT,
-        )
+        model = _get_model()
 
         # Construir system prompt usando template Jinja2 (async: carga horario y productos en paralelo)
         system_prompt = await build_citas_system_prompt(

@@ -11,6 +11,8 @@ LECTURA. No usar en operaciones de escritura (CREAR_EVENTO) por riesgo de
 duplicados si el servidor recibió la request pero la respuesta timeouteó.
 """
 
+import json
+import logging
 from typing import Any, Dict, Optional
 
 import httpx
@@ -18,8 +20,12 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_ex
 
 try:
     from .. import config as app_config
+    from ..logger import get_logger
 except ImportError:
     from citas import config as app_config
+    from citas.logger import get_logger
+
+logger = get_logger(__name__)
 
 _client: Optional[httpx.AsyncClient] = None
 
@@ -80,4 +86,36 @@ async def post_with_retry(url: str, json: Dict[str, Any]) -> Dict[str, Any]:
     return response.json()
 
 
-__all__ = ["get_client", "close_http_client", "post_with_retry"]
+async def post_with_logging(url: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Wrapper sobre post_with_retry que loguea request y response en DEBUG.
+
+    - Solo serializa JSON cuando DEBUG está activo (isEnabledFor guard) para no
+      penalizar producción.
+    - Loguea warnings en HTTPStatusError y TransportError (ya los maneja tenacity,
+      pero el log queda visible antes del CB).
+    - Propaga todas las excepciones sin modificarlas.
+
+    ADVERTENCIA: usar solo en operaciones de LECTURA idempotentes (igual que post_with_retry).
+    """
+    cod_ope = payload.get("codOpe", "")
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug("[API] POST %s - %s", url, json.dumps(payload, ensure_ascii=False))
+    try:
+        data = await post_with_retry(url, payload)
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug("[API] Response (codOpe=%s): %s", cod_ope, json.dumps(data, ensure_ascii=False))
+        return data
+    except (httpx.HTTPStatusError, httpx.TransportError) as e:
+        logger.warning("[API] %s (codOpe=%s): %s", type(e).__name__, cod_ope, e)
+        raise
+    except Exception as e:
+        logger.error(
+            "[API] Error inesperado (codOpe=%s): %s: %s",
+            cod_ope, type(e).__name__, e,
+            exc_info=True,
+        )
+        raise
+
+
+__all__ = ["get_client", "close_http_client", "post_with_retry", "post_with_logging"]

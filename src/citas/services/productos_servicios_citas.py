@@ -7,18 +7,18 @@ Devuelve solo nombres (máx 10 de cada) para inyectar en el system prompt.
 import asyncio
 from typing import Any, List, Optional, Tuple
 
-import httpx
-
 try:
     from .. import config as app_config
     from ..logger import get_logger
-    from .http_client import post_with_retry
+    from .http_client import post_with_logging
     from .circuit_breaker import informacion_cb
+    from ._resilience import resilient_call
 except ImportError:
     from citas import config as app_config
     from citas.logger import get_logger
-    from citas.services.http_client import post_with_retry
+    from citas.services.http_client import post_with_logging
     from citas.services.circuit_breaker import informacion_cb
+    from citas.services._resilience import resilient_call
 
 logger = get_logger(__name__)
 
@@ -42,6 +42,7 @@ async def _fetch_nombres(cod_ope: str, id_empresa: Any, max_items: int, response
     if id_empresa is None or id_empresa == "":
         return []
 
+    # Fast reject antes de tocar la red
     if informacion_cb.is_open(id_empresa):
         return []
 
@@ -50,8 +51,12 @@ async def _fetch_nombres(cod_ope: str, id_empresa: Any, max_items: int, response
         "id_empresa": id_empresa,
     }
     try:
-        logger.debug("[PRODUCTOS_SERVICIOS] POST %s - codOpe=%s", app_config.API_INFORMACION_URL, cod_ope)
-        data = await post_with_retry(app_config.API_INFORMACION_URL, json=payload)
+        data = await resilient_call(
+            lambda: post_with_logging(app_config.API_INFORMACION_URL, payload),
+            cb=informacion_cb,
+            circuit_key=id_empresa,
+            service_name="PRODUCTOS_SERVICIOS",
+        )
 
         if not data.get("success"):
             logger.warning("[PRODUCTOS_SERVICIOS] API no success para %s: %s", cod_ope, data.get("error"))
@@ -64,15 +69,10 @@ async def _fetch_nombres(cod_ope: str, id_empresa: Any, max_items: int, response
                 nombres.append(str(item["nombre"]).strip())
             elif isinstance(item, str):
                 nombres.append(item.strip())
-        informacion_cb.record_success(id_empresa)
         return nombres
 
-    except httpx.TransportError as e:
-        informacion_cb.record_failure(id_empresa)
-        logger.warning("[PRODUCTOS_SERVICIOS] Error de red al obtener %s: %s", cod_ope, e)
-        return []
     except Exception as e:
-        logger.warning("[PRODUCTOS_SERVICIOS] Error inesperado %s: %s", cod_ope, e)
+        logger.warning("[PRODUCTOS_SERVICIOS] Error al obtener %s: %s", cod_ope, e)
         return []
 
 

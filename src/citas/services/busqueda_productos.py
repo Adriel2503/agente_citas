@@ -7,18 +7,18 @@ import json
 import re
 from typing import Any, Dict, List, Optional
 
-import httpx
-
 try:
     from .. import config as app_config
     from ..logger import get_logger
-    from .http_client import post_with_retry
+    from .http_client import post_with_logging
     from .circuit_breaker import informacion_cb
+    from ._resilience import resilient_call
 except ImportError:
     from citas import config as app_config
     from citas.logger import get_logger
-    from citas.services.http_client import post_with_retry
+    from citas.services.http_client import post_with_logging
     from citas.services.circuit_breaker import informacion_cb
+    from citas.services._resilience import resilient_call
 
 logger = get_logger(__name__)
 
@@ -127,14 +127,13 @@ async def buscar_productos_servicios(
         logger.info("[search_productos_servicios] API: ws_informacion_ia.php - BUSCAR_PRODUCTOS_SERVICIOS_CITAS")
         logger.info("  URL: %s", app_config.API_INFORMACION_URL)
         logger.info("  Enviado: %s", json.dumps(payload, ensure_ascii=False))
-    logger.debug(
-        "[BUSQUEDA] POST %s - %s",
-        app_config.API_INFORMACION_URL,
-        json.dumps(payload, ensure_ascii=False),
-    )
-
     try:
-        data = await post_with_retry(app_config.API_INFORMACION_URL, json=payload)
+        data = await resilient_call(
+            lambda: post_with_logging(app_config.API_INFORMACION_URL, payload),
+            cb=informacion_cb,
+            circuit_key=id_empresa,
+            service_name="BUSQUEDA",
+        )
 
         if log_search_apis:
             logger.info("  Respuesta: %s", json.dumps(data, ensure_ascii=False))
@@ -144,16 +143,11 @@ async def buscar_productos_servicios(
             return {"success": False, "productos": [], "error": error_msg}
 
         productos = data.get("productos", [])
-        informacion_cb.record_success(id_empresa)
         return {"success": True, "productos": productos, "error": None}
 
-    except httpx.TransportError as e:
-        informacion_cb.record_failure(id_empresa)
-        logger.warning("[BUSQUEDA] Error de red al buscar productos: %s", e)
-        return {"success": False, "productos": [], "error": "La búsqueda tardó demasiado. Intenta de nuevo."}
     except Exception as e:
-        logger.exception("[BUSQUEDA] Error inesperado: %s", e)
-        return {"success": False, "productos": [], "error": str(e)}
+        logger.warning("[BUSQUEDA] Error al buscar productos id_empresa=%s: %s", id_empresa, e)
+        return {"success": False, "productos": [], "error": "La búsqueda tardó demasiado. Intenta de nuevo."}
 
 
 __all__ = ["buscar_productos_servicios", "format_productos_para_respuesta"]
