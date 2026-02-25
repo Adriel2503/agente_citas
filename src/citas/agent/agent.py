@@ -5,7 +5,7 @@ Versión mejorada con logging, métricas, configuración centralizada y memoria 
 
 import asyncio
 import re
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any
 from dataclasses import dataclass
 
 from cachetools import TTLCache
@@ -19,14 +19,14 @@ try:
     from ..config.models import CitaConfig
     from ..tool.tools import AGENT_TOOLS
     from ..logger import get_logger
-    from ..metrics import track_chat_response, track_llm_call, record_chat_error, chat_requests_total
+    from ..metrics import track_chat_response, track_llm_call, record_chat_error, chat_requests_total, AGENT_CACHE
     from ..prompts import build_citas_system_prompt
 except ImportError:
     from citas import config as app_config
     from citas.config.models import CitaConfig
     from citas.tool.tools import AGENT_TOOLS
     from citas.logger import get_logger
-    from citas.metrics import track_chat_response, track_llm_call, record_chat_error, chat_requests_total
+    from citas.metrics import track_chat_response, track_llm_call, record_chat_error, chat_requests_total, AGENT_CACHE
     from citas.prompts import build_citas_system_prompt
 
 logger = get_logger(__name__)
@@ -51,7 +51,7 @@ _model = None
 # Evita que dos mensajes del mismo usuario (doble-click / reintento) ejecuten
 # agent.ainvoke sobre el mismo thread_id del checkpointer en paralelo.
 # Crece con cada sesión nueva; se limpia cuando supera _SESSION_LOCKS_CLEANUP_THRESHOLD.
-_session_locks: Dict[int, asyncio.Lock] = {}
+_session_locks: dict[int, asyncio.Lock] = {}
 _SESSION_LOCKS_CLEANUP_THRESHOLD = 500  # multiempresa: muchas sesiones; limpieza periódica
 
 # Cache de agentes compilados: clave = (id_empresa, personalidad).
@@ -64,7 +64,7 @@ _agent_cache: TTLCache = TTLCache(
 )
 # Un lock por cache_key para evitar thundering herd al crear el agente por primera vez.
 # Crece con cada (id_empresa, personalidad) nuevo; se limpia cuando supera _LOCKS_CLEANUP_THRESHOLD.
-_agent_cache_locks: Dict[Tuple, asyncio.Lock] = {}
+_agent_cache_locks: dict[tuple, asyncio.Lock] = {}
 _LOCKS_CLEANUP_THRESHOLD = 750  # 1.5x cache maxsize; si se supera, se eliminan locks huérfanos
 
 _IMAGE_URL_RE = re.compile(
@@ -74,7 +74,7 @@ _IMAGE_URL_RE = re.compile(
 _MAX_IMAGES = 10  # límite de OpenAI Vision
 
 
-def _build_content(message: str) -> Union[str, List[dict]]:
+def _build_content(message: str) -> str | list[dict]:
     """
     Devuelve string si no hay URLs de imagen (Caso 1),
     o lista de bloques OpenAI Vision si las hay (Casos 2-5).
@@ -93,7 +93,7 @@ def _build_content(message: str) -> Union[str, List[dict]]:
     urls = urls[:_MAX_IMAGES]
     text = _IMAGE_URL_RE.sub("", message).strip()
 
-    blocks: List[dict] = []
+    blocks: list[dict] = []
     if text:
         blocks.append({"type": "text", "text": text})
     for url in urls:
@@ -118,7 +118,7 @@ class AgentContext:
     session_id: int = 0
 
 
-def _validate_context(context: Dict[str, Any]) -> None:
+def _validate_context(context: dict[str, Any]) -> None:
     """
     Valida que el contexto tenga los parámetros requeridos.
     
@@ -128,7 +128,7 @@ def _validate_context(context: Dict[str, Any]) -> None:
     Raises:
         ValueError: Si faltan parámetros requeridos
     """
-    config_data = context.get("config", {})
+    config_data: dict[str, Any] = context.get("config", {})
     required_keys = ["id_empresa"]
     missing = [k for k in required_keys if k not in config_data or config_data[k] is None]
     
@@ -138,7 +138,7 @@ def _validate_context(context: Dict[str, Any]) -> None:
     logger.debug("[AGENT] Context validated: id_empresa=%s", config_data.get("id_empresa"))
 
 
-def _cleanup_stale_agent_locks(current_cache_key: Tuple) -> None:
+def _cleanup_stale_agent_locks(current_cache_key: tuple) -> None:
     """
     Elimina locks de _agent_cache_locks cuyas claves ya no están en _agent_cache.
     Solo se ejecuta si el dict supera _LOCKS_CLEANUP_THRESHOLD.
@@ -199,7 +199,7 @@ def _get_model():
     return _model
 
 
-async def _get_agent(config: Dict[str, Any]):
+async def _get_agent(config: dict[str, Any]):
     """
     Devuelve el agente compilado para la combinación (id_empresa, personalidad).
 
@@ -218,52 +218,58 @@ async def _get_agent(config: Dict[str, Any]):
     Returns:
         Agente configurado con tools y checkpointer
     """
-    cache_key: Tuple = (config.get("id_empresa"), config.get("personalidad", ""))
+    cache_key: tuple = (config.get("id_empresa"), config.get("personalidad", ""))
 
     # Fast path: cache hit (sin await, atómico en asyncio single-thread)
     if cache_key in _agent_cache:
+        AGENT_CACHE.labels(result="hit").inc()
         logger.debug("[AGENT] Cache hit - id_empresa=%s", cache_key[0])
         return _agent_cache[cache_key]
 
     # Slow path: serializar creación para evitar thundering herd
     _cleanup_stale_agent_locks(cache_key)
     lock = _agent_cache_locks.setdefault(cache_key, asyncio.Lock())
-    async with lock:
-        # Double-check tras adquirir el lock (otra coroutine pudo haberlo creado)
-        if cache_key in _agent_cache:
-            logger.debug("[AGENT] Cache hit tras lock - id_empresa=%s", cache_key[0])
-            return _agent_cache[cache_key]
+    try:
+        async with lock:
+            # Double-check tras adquirir el lock (otra coroutine pudo haberlo creado)
+            if cache_key in _agent_cache:
+                AGENT_CACHE.labels(result="hit").inc()
+                logger.debug("[AGENT] Cache hit tras lock - id_empresa=%s", cache_key[0])
+                return _agent_cache[cache_key]
 
-        logger.debug("[AGENT] Creando agente con LangChain 1.2+ API - id_empresa=%s", cache_key[0])
+            AGENT_CACHE.labels(result="miss").inc()
+            logger.debug("[AGENT] Creando agente con LangChain 1.2+ API - id_empresa=%s", cache_key[0])
 
-        model = _get_model()
+            model = _get_model()
 
-        # Construir system prompt usando template Jinja2 (async: carga horario y productos en paralelo)
-        system_prompt = await build_citas_system_prompt(
-            config=config,
-            history=None,
-        )
+            # Construir system prompt usando template Jinja2 (async: carga horario y productos en paralelo)
+            system_prompt = await build_citas_system_prompt(
+                config=config,
+                history=None,
+            )
 
-        # Crear agente con API moderna (response_format: reply + url opcional)
-        agent = create_agent(
-            model=model,
-            tools=AGENT_TOOLS,
-            system_prompt=system_prompt,
-            checkpointer=_checkpointer,
-            response_format=CitaStructuredResponse,
-        )
+            # Crear agente con API moderna (response_format: reply + url opcional)
+            agent = create_agent(
+                model=model,
+                tools=AGENT_TOOLS,
+                system_prompt=system_prompt,
+                checkpointer=_checkpointer,
+                response_format=CitaStructuredResponse,
+            )
 
-        _agent_cache[cache_key] = agent
-        logger.debug(
-            "[AGENT] Agente cacheado - id_empresa=%s, Tools: %s, TTL: %ss",
-            cache_key[0],
-            len(AGENT_TOOLS),
-            app_config.AGENT_CACHE_TTL_MINUTES * 60,
-        )
-        return agent
+            _agent_cache[cache_key] = agent
+            logger.debug(
+                "[AGENT] Agente cacheado - id_empresa=%s, Tools: %s, TTL: %ss",
+                cache_key[0],
+                len(AGENT_TOOLS),
+                app_config.AGENT_CACHE_TTL_MINUTES * 60,
+            )
+            return agent
+    finally:
+        _agent_cache_locks.pop(cache_key, None)
 
 
-def _prepare_agent_context(context: Dict[str, Any], session_id: int) -> AgentContext:
+def _prepare_agent_context(context: dict[str, Any], session_id: int) -> AgentContext:
     """
     Prepara el contexto runtime para inyectar a las tools del agente.
     
@@ -277,10 +283,10 @@ def _prepare_agent_context(context: Dict[str, Any], session_id: int) -> AgentCon
     Returns:
         AgentContext configurado
     """
-    config_data = context.get("config", {})
-    
+    config_data: dict[str, Any] = context.get("config", {})
+
     # id_empresa ya está validado, usar directamente
-    context_params = {
+    context_params: dict[str, Any] = {
         "id_empresa": config_data["id_empresa"],
         "session_id": session_id,
         "id_prospecto": session_id,
@@ -323,7 +329,7 @@ def _prepare_agent_context(context: Dict[str, Any], session_id: int) -> AgentCon
 async def process_cita_message(
     message: str,
     session_id: int,
-    context: Dict[str, Any]
+    context: dict[str, Any],
 ) -> tuple[str, str | None]:
     """
     Procesa un mensaje del cliente sobre citas/reuniones usando LangChain 1.2+ Agent.

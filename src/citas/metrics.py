@@ -60,7 +60,34 @@ api_calls_total = Counter(
     ['endpoint', 'status']
 )
 
+# HTTP layer (/api/chat)
+HTTP_REQUESTS = Counter(
+    'citas_http_requests_total',
+    'Total de requests al endpoint /api/chat por resultado',
+    ['status'],  # success | timeout | error
+)
+
+# Cache del agente (por empresa)
+AGENT_CACHE = Counter(
+    'citas_agent_cache_total',
+    'Hits y misses del cache de agente por empresa',
+    ['result'],  # hit | miss
+)
+
+# Cache de búsqueda de productos
+SEARCH_CACHE = Counter(
+    'citas_search_cache_total',
+    'Resultados del cache de búsqueda de productos',
+    ['result'],  # hit | miss | circuit_open
+)
+
 # ========== HISTOGRAMAS (LATENCIA) ==========
+
+HTTP_DURATION = Histogram(
+    'citas_http_duration_seconds',
+    'Latencia total del endpoint /api/chat (incluye LLM y tools)',
+    buckets=[0.25, 0.5, 1, 2.5, 5, 10, 20, 30, 60, 90, 120],
+)
 
 chat_response_duration_seconds = Histogram(
     'agent_citas_chat_response_duration_seconds',
@@ -224,4 +251,8 @@ __all__ = [
     'chat_requests_total',
     'booking_success_total',
     'booking_failed_total',
+    'HTTP_REQUESTS',
+    'HTTP_DURATION',
+    'AGENT_CACHE',
+    'SEARCH_CACHE',
 ]

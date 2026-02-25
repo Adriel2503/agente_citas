@@ -7,6 +7,7 @@ Versión mejorada con logging, métricas y observabilidad.
 
 import asyncio
 import logging
+import time
 from contextlib import asynccontextmanager
 from typing import Any, Dict
 
@@ -20,14 +21,14 @@ try:
     from . import config as app_config
     from .agent import process_cita_message
     from .logger import setup_logging, get_logger
-    from .metrics import initialize_agent_info
+    from .metrics import initialize_agent_info, HTTP_REQUESTS, HTTP_DURATION
     from .services.http_client import close_http_client
     from .services.circuit_breaker import informacion_cb, preguntas_cb, calendario_cb
 except ImportError:
     from citas import config as app_config
     from citas.agent import process_cita_message
     from citas.logger import setup_logging, get_logger
-    from citas.metrics import initialize_agent_info
+    from citas.metrics import initialize_agent_info, HTTP_REQUESTS, HTTP_DURATION
     from citas.services.http_client import close_http_client
     from citas.services.circuit_breaker import informacion_cb, preguntas_cb, calendario_cb
 
@@ -124,6 +125,9 @@ async def chat(req: ChatRequest) -> ChatResponse:
     logger.debug("[HTTP] Message: %s...", req.message[:100])
     logger.debug("[HTTP] Context keys: %s", list(context.keys()))
 
+    _start = time.perf_counter()
+    _http_status = "success"
+
     try:
         reply, url = await asyncio.wait_for(
             process_cita_message(
@@ -139,22 +143,31 @@ async def chat(req: ChatRequest) -> ChatResponse:
         return ChatResponse(reply=reply, url=url)
 
     except asyncio.TimeoutError:
+        _http_status = "timeout"
         error_msg = f"La solicitud tardó más de {app_config.CHAT_TIMEOUT}s. Por favor, intenta de nuevo."
         logger.error("[HTTP] Timeout en process_cita_message (CHAT_TIMEOUT=%s)", app_config.CHAT_TIMEOUT)
         return ChatResponse(reply=error_msg, url=None)
 
     except ValueError as e:
+        _http_status = "error"
         error_msg = f"Error de configuración: {str(e)}"
         logger.error("[HTTP] %s", error_msg)
         return ChatResponse(reply=error_msg, url=None)
 
     except asyncio.CancelledError:
+        _http_status = None  # No contar requests abortados externamente
         raise
 
     except Exception as e:
+        _http_status = "error"
         error_msg = f"Error procesando mensaje: {str(e)}"
         logger.error("[HTTP] %s", error_msg, exc_info=True)
         return ChatResponse(reply=error_msg, url=None)
+
+    finally:
+        if _http_status is not None:
+            HTTP_REQUESTS.labels(status=_http_status).inc()
+            HTTP_DURATION.observe(time.perf_counter() - _start)
 
 
 # ---------------------------------------------------------------------------
