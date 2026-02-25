@@ -3,7 +3,7 @@ Búsqueda de productos y servicios desde ws_informacion_ia.php.
 Usa codOpe: BUSCAR_PRODUCTOS_SERVICIOS_CITAS
 
 Resiliencia:
-  - TTLCache 15 min por (id_empresa, búsqueda, limite): absorbe búsquedas repetidas
+  - TTLCache 15 min por (id_empresa, búsqueda): absorbe búsquedas repetidas
     del mismo término entre usuarios de la misma empresa.
   - Anti-thundering herd: si N usuarios buscan el mismo término simultáneamente
     en cache miss, solo el primero llama a la API; los demás esperan ese Lock.
@@ -36,12 +36,13 @@ except ImportError:
 logger = get_logger(__name__)
 
 COD_OPE = "BUSCAR_PRODUCTOS_SERVICIOS_CITAS"
+MAX_RESULTADOS = 10
 
 # ---------------------------------------------------------------------------
 # Cache de búsquedas
 # ---------------------------------------------------------------------------
 
-# Key: (id_empresa, término_normalizado, limite) → resultado completo.
+# Key: (id_empresa, término_normalizado) → resultado completo.
 # TTL 15 min: suficiente para absorber picos de búsquedas repetidas sin mostrar datos viejos.
 # maxsize 2000: ~40 términos por empresa para 50 empresas simultáneas.
 _busqueda_cache: TTLCache = TTLCache(maxsize=2000, ttl=900)
@@ -182,19 +183,17 @@ async def _do_busqueda_api(
 async def buscar_productos_servicios(
     id_empresa: int,
     busqueda: str,
-    limite: int = 10,
     log_search_apis: bool = False,
 ) -> dict[str, Any]:
     """
     Busca productos y servicios por término.
 
-    Incluye TTLCache 15 min por (id_empresa, búsqueda, limite), anti-thundering herd,
+    Incluye TTLCache 15 min por (id_empresa, búsqueda), anti-thundering herd,
     retry tenacity (TransportError) y circuit breaker compartido (informacion_cb).
 
     Args:
         id_empresa: ID de la empresa
         busqueda: Término de búsqueda
-        limite: Cantidad máxima de resultados (default 10)
         log_search_apis: Si True, registra API, URL, payload y respuesta en info
 
     Returns:
@@ -204,7 +203,7 @@ async def buscar_productos_servicios(
         return {"success": False, "productos": [], "error": "El término de búsqueda no puede estar vacío"}
 
     busqueda_norm = str(busqueda).strip()
-    cache_key = (id_empresa, busqueda_norm.lower(), limite)
+    cache_key = (id_empresa, busqueda_norm.lower())
 
     # 1. Cache hit — respuesta inmediata sin tocar la red
     if cache_key in _busqueda_cache:
@@ -225,7 +224,7 @@ async def buscar_productos_servicios(
         "codOpe": COD_OPE,
         "id_empresa": id_empresa,
         "busqueda": busqueda_norm,
-        "limite": limite,
+        "limite": MAX_RESULTADOS,
     }
 
     # 3. Anti-thundering herd: Lock por cache_key + double-check.

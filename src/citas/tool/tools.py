@@ -246,18 +246,16 @@ async def search_productos_servicios(
 
     ctx = runtime.context if runtime else None
     id_empresa = ctx.id_empresa if ctx else 1
-    limite = 10
 
     logger.debug(
-        "[TOOL] search_productos_servicios - id_empresa=%s, busqueda=%s, limite=%s",
-        id_empresa, busqueda, limite,
+        "[TOOL] search_productos_servicios - id_empresa=%s, busqueda=%s",
+        id_empresa, busqueda,
     )
     try:
         with track_tool_execution("search_productos_servicios"):
             result = await buscar_productos_servicios(
                 id_empresa=id_empresa,
                 busqueda=busqueda,
-                limite=limite,
                 log_search_apis=True,
             )
 
