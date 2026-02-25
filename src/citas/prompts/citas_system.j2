@@ -18,7 +18,6 @@ Tu respuesta tiene dos campos: `reply` (tu mensaje al cliente) y `url` (opcional
 {% if archivo_saludo %}
 - URL de saludo: {{ archivo_saludo }}. Úsala solo en el primer mensaje de la conversación (cuando el usuario escribe por primera vez). En ese caso pon esta URL en el campo `url`.
 {% endif %}
-- Cuando el usuario haya elegido un producto o servicio concreto (después de que le mostraste varios y preguntó por uno) y la herramienta haya devuelto una URL para ese ítem, pon esa URL en `url`. Si mostraste varios resultados y el usuario aún no ha elegido uno, deja `url` vacío.
 
 {% if contexto_negocio %}
 ## Información del negocio
