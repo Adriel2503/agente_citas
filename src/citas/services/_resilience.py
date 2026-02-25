@@ -1,14 +1,14 @@
 """
 Helper de resiliencia compartido: circuit breaker.
 
-El retry ya lo maneja tenacity en post_with_retry (http_client.py).
+El retry ya lo maneja tenacity en post_with_logging (http_client.py).
 Este módulo solo se ocupa de verificar/actualizar el estado del CB.
 
 Uso:
     from .circuit_breaker import informacion_cb
 
     data = await resilient_call(
-        lambda: post_with_retry(url, json=payload),
+        lambda: post_with_logging(app_config.API_INFORMACION_URL, payload),
         cb=informacion_cb,
         circuit_key=id_empresa,
         service_name="MI_SERVICIO",
@@ -41,7 +41,7 @@ async def resilient_call(
     - Otros errores (HTTPStatusError, etc.) → re-lanza sin afectar el CB.
 
     El retry ante fallos de red transitorios lo maneja tenacity dentro de
-    post_with_retry (http_client.py); este wrapper solo gestiona el CB.
+    post_with_logging (http_client.py); este wrapper solo gestiona el CB.
 
     Args:
         coro_factory:  Callable sin argumentos que retorna una coroutine.
