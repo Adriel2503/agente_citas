@@ -14,7 +14,7 @@ Resiliencia:
 import asyncio
 import json
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from cachetools import TTLCache
 
@@ -47,14 +47,14 @@ COD_OPE = "BUSCAR_PRODUCTOS_SERVICIOS_CITAS"
 _busqueda_cache: TTLCache = TTLCache(maxsize=2000, ttl=900)
 
 # Lock por cache_key para anti-thundering herd. Limpiado en finally.
-_busqueda_locks: Dict[tuple, asyncio.Lock] = {}
+_busqueda_locks: dict[tuple, asyncio.Lock] = {}
 
 
 # ---------------------------------------------------------------------------
 # Formateo de resultados
 # ---------------------------------------------------------------------------
 
-def _clean_description(desc: Optional[str], max_chars: int = 120) -> str:
+def _clean_description(desc: str | None, max_chars: int = 120) -> str:
     """Limpia HTML y trunca la descripción."""
     if not desc or not str(desc).strip():
         return "-"
@@ -81,7 +81,7 @@ def _format_precio_linea(precio_str: str, es_servicio: bool, unidad: str) -> str
     return f"- *Precio:* {precio_str} por {unidad}"
 
 
-def _format_item(p: Dict[str, Any]) -> List[str]:
+def _format_item(p: dict[str, Any]) -> list[str]:
     """
     Formato único para Producto y Servicio:
     - Producto: Precio por unidad (nombre_unidad de API).
@@ -109,7 +109,7 @@ def _format_item(p: Dict[str, Any]) -> List[str]:
     return lineas
 
 
-def format_productos_para_respuesta(productos: List[Dict[str, Any]]) -> str:
+def format_productos_para_respuesta(productos: list[dict[str, Any]]) -> str:
     """Formatea la lista de productos/servicios para la respuesta de la tool."""
     if not productos:
         return "No se encontraron resultados."
@@ -128,9 +128,9 @@ async def _do_busqueda_api(
     id_empresa: int,
     busqueda_norm: str,
     cache_key: tuple,
-    payload: Dict[str, Any],
+    payload: dict[str, Any],
     log_search_apis: bool,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Ejecuta la llamada real a la API con resilient_call. Se llama SOLO desde
     buscar_productos_servicios, dentro de un asyncio.Lock (anti-thundering herd).
@@ -184,7 +184,7 @@ async def buscar_productos_servicios(
     busqueda: str,
     limite: int = 10,
     log_search_apis: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Busca productos y servicios por término.
 

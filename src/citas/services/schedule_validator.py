@@ -6,7 +6,7 @@ Versión mejorada con async, cache global y logging.
 import json
 import httpx
 from datetime import datetime, timedelta
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 from zoneinfo import ZoneInfo
 
 try:
@@ -74,7 +74,7 @@ class ScheduleValidator:
         self.agendar_sucursal = agendar_sucursal
         self.log_create_booking_apis = log_create_booking_apis
 
-    def _parse_time(self, time_str: str) -> Optional[datetime]:
+    def _parse_time(self, time_str: str) -> datetime | None:
         """
         Parsea una hora en formato HH:MM AM/PM o HH:MM.
         
@@ -95,7 +95,7 @@ class ScheduleValidator:
 
         return None
 
-    def _parse_time_range(self, range_str: str) -> Optional[Tuple[datetime, datetime]]:
+    def _parse_time_range(self, range_str: str) -> tuple[datetime, datetime] | None:
         """
         Parsea un rango de horario como '09:00-18:00' o '9:00 AM - 6:00 PM'.
         
@@ -171,7 +171,7 @@ class ScheduleValidator:
 
         return False
 
-    async def _check_availability(self, fecha_str: str, hora_str: str) -> Dict[str, Any]:
+    async def _check_availability(self, fecha_str: str, hora_str: str) -> dict[str, Any]:
         """
         Verifica disponibilidad contra citas existentes.
 
@@ -239,7 +239,7 @@ class ScheduleValidator:
             logger.warning("[AVAILABILITY] Error inesperado: %s - graceful degradation", e)
             return {"available": True, "error": None}
 
-    async def validate(self, fecha_str: str, hora_str: str) -> Dict[str, Any]:
+    async def validate(self, fecha_str: str, hora_str: str) -> dict[str, Any]:
         """
         Valida si la fecha y hora son válidas para agendar.
 
@@ -333,9 +333,9 @@ class ScheduleValidator:
 
     async def recommendation(
         self,
-        fecha_solicitada: Optional[str] = None,
-        hora_solicitada: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        fecha_solicitada: str | None = None,
+        hora_solicitada: str | None = None,
+    ) -> dict[str, Any]:
         """
         Genera recomendaciones de horarios disponibles.
         Si el cliente dio fecha Y hora concretas, primero consulta CONSULTAR_DISPONIBILIDAD para ese slot.

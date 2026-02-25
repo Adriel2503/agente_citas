@@ -6,7 +6,6 @@ Usa Prometheus para tracking de performance y uso.
 from prometheus_client import Counter, Histogram, Gauge, Info
 import time
 from contextlib import contextmanager
-from typing import Optional
 
 # ========== CONTADORES ==========
 

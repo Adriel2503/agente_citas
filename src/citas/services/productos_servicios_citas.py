@@ -5,7 +5,7 @@ Devuelve solo nombres (máx 10 de cada) para inyectar en el system prompt.
 """
 
 import asyncio
-from typing import Any, List, Optional, Tuple
+from typing import Any
 
 try:
     from .. import config as app_config
@@ -26,7 +26,7 @@ _MAX_PRODUCTOS = 10
 _MAX_SERVICIOS = 10
 
 
-async def _fetch_nombres(cod_ope: str, id_empresa: Any, max_items: int, response_key: str) -> List[str]:
+async def _fetch_nombres(cod_ope: str, id_empresa: Any, max_items: int, response_key: str) -> list[str]:
     """
     Obtiene una lista de la API y extrae solo los nombres.
 
@@ -76,7 +76,7 @@ async def _fetch_nombres(cod_ope: str, id_empresa: Any, max_items: int, response
         return []
 
 
-async def fetch_nombres_productos_servicios(id_empresa: Optional[Any]) -> Tuple[List[str], List[str]]:
+async def fetch_nombres_productos_servicios(id_empresa: Any | None) -> tuple[list[str], list[str]]:
     """
     Obtiene listas de nombres de productos y servicios (máx 10 de cada) en paralelo.
 
@@ -101,7 +101,7 @@ async def fetch_nombres_productos_servicios(id_empresa: Optional[Any]) -> Tuple[
     return nombres_productos, nombres_servicios
 
 
-def format_nombres_para_prompt(nombres_productos: List[str], nombres_servicios: List[str]) -> str:
+def format_nombres_para_prompt(nombres_productos: list[str], nombres_servicios: list[str]) -> str:
     """
     Formatea las listas para inyectar en el system prompt.
     """

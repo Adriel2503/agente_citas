@@ -5,7 +5,7 @@ Cache TTL + circuit breaker compartido (informacion_cb). El retry lo provee post
 """
 
 import asyncio
-from typing import Any, Dict, Optional
+from typing import Any
 
 from cachetools import TTLCache
 
@@ -28,10 +28,10 @@ logger = get_logger(__name__)
 _contexto_cache: TTLCache = TTLCache(maxsize=500, ttl=3600)  # id_empresa -> contexto (str)
 
 # Lock por id_empresa para evitar thundering herd (mismo patrón que horario_cache).
-_fetch_locks: Dict[Any, asyncio.Lock] = {}
+_fetch_locks: dict[Any, asyncio.Lock] = {}
 
 
-async def fetch_contexto_negocio(id_empresa: Optional[Any]) -> Optional[str]:
+async def fetch_contexto_negocio(id_empresa: Any | None) -> str | None:
     """
     Obtiene el contexto de negocio desde la API para inyectar en el system prompt.
     Incluye cache TTL (1 h) y circuit breaker (3 fallos → abierto 5 min).

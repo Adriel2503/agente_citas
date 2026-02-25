@@ -13,7 +13,7 @@ duplicados si el servidor recibió la request pero la respuesta timeouteó.
 
 import json
 import logging
-from typing import Any, Dict, Optional
+from typing import Any
 
 import httpx
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
@@ -27,7 +27,7 @@ except ImportError:
 
 logger = get_logger(__name__)
 
-_client: Optional[httpx.AsyncClient] = None
+_client: httpx.AsyncClient | None = None
 
 
 def get_client() -> httpx.AsyncClient:
@@ -65,7 +65,7 @@ async def close_http_client() -> None:
     retry=retry_if_exception_type(httpx.TransportError),
     reraise=True,
 )
-async def post_with_retry(url: str, json: Dict[str, Any]) -> Dict[str, Any]:
+async def post_with_retry(url: str, json: dict[str, Any]) -> dict[str, Any]:
     """
     POST con retry automático para errores de red transitoria.
 
@@ -86,7 +86,7 @@ async def post_with_retry(url: str, json: Dict[str, Any]) -> Dict[str, Any]:
     return response.json()
 
 
-async def post_with_logging(url: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+async def post_with_logging(url: str, payload: dict[str, Any]) -> dict[str, Any]:
     """
     Wrapper sobre post_with_retry que loguea request y response en DEBUG.
 

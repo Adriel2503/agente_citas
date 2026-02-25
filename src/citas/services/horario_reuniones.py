@@ -3,7 +3,7 @@ Horario de reuniones: fetch desde API MaravIA y formateo para system prompt.
 Usa OBTENER_HORARIO_REUNIONES (ws_informacion_ia.php) a través de horario_cache.
 """
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 try:
     from ..logger import get_logger
@@ -25,7 +25,7 @@ _DIAS_ORDEN = [
 ]
 
 
-def format_horario_for_system_prompt(horario_reuniones: Dict[str, Any]) -> str:
+def format_horario_for_system_prompt(horario_reuniones: dict[str, Any]) -> str:
     """
     Formatea el horario de reuniones para inyectar en el system prompt.
     Estructura: lista por día con rango de hora o "Cerrado".
@@ -54,7 +54,7 @@ def format_horario_for_system_prompt(horario_reuniones: Dict[str, Any]) -> str:
     return "\n".join(lineas)
 
 
-async def fetch_horario_reuniones(id_empresa: Optional[Any]) -> str:
+async def fetch_horario_reuniones(id_empresa: Any | None) -> str:
     """
     Obtiene el horario de reuniones desde la cache/API y lo devuelve formateado
     para el system prompt.

@@ -10,7 +10,7 @@ hace el HTTP call; las demás esperan el lock y encuentran el cache ya lleno.
 """
 
 import asyncio
-from typing import Any, Dict, Optional
+from typing import Any
 
 from cachetools import TTLCache
 
@@ -37,7 +37,7 @@ _horario_cache: TTLCache = TTLCache(
 )
 
 # Lock por id_empresa para serializar el fetch HTTP cuando el cache está vacío.
-_fetch_locks: Dict[Any, asyncio.Lock] = {}
+_fetch_locks: dict[Any, asyncio.Lock] = {}
 
 
 def clear_horario_cache() -> None:
@@ -47,7 +47,7 @@ def clear_horario_cache() -> None:
     logger.debug("[HORARIO_CACHE] Cache limpiada")
 
 
-async def get_horario(id_empresa: Optional[Any]) -> Optional[Dict[str, Any]]:
+async def get_horario(id_empresa: Any | None) -> dict[str, Any] | None:
     """
     Obtiene el dict horario_reuniones desde la API con cache TTL.
 

@@ -4,7 +4,7 @@ Prompts del agente de citas. Builder del system prompt.
 
 import asyncio
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -36,7 +36,7 @@ _MESES_ESPANOL = [
     "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
 ]
 
-_DEFAULTS: Dict[str, Any] = {
+_DEFAULTS: dict[str, Any] = {
     "personalidad": "amable, profesional y eficiente",
 }
 
@@ -52,7 +52,7 @@ def _now_peru() -> datetime:
     return datetime.now(_ZONA_PERU)
 
 
-def _apply_defaults(config: Dict[str, Any]) -> Dict[str, Any]:
+def _apply_defaults(config: dict[str, Any]) -> dict[str, Any]:
     """Aplica valores por defecto a la configuración."""
     out = dict(_DEFAULTS)
     for k, v in config.items():
@@ -62,8 +62,8 @@ def _apply_defaults(config: Dict[str, Any]) -> Dict[str, Any]:
 
 
 async def build_citas_system_prompt(
-    config: Dict[str, Any],
-    history: List[Dict] = None
+    config: dict[str, Any],
+    history: list[dict] = None
 ) -> str:
     """
     Construye el system prompt del agente de citas.

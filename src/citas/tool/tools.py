@@ -6,7 +6,7 @@ NO están expuestas directamente al orquestador.
 Versión mejorada con logging, métricas, validación y runtime context (LangChain 1.2+).
 """
 
-from typing import Any, Dict, Optional
+from typing import Any
 from langchain.tools import tool, ToolRuntime
 
 try:
@@ -30,7 +30,7 @@ logger = get_logger(__name__)
 @tool
 async def check_availability(
     date: str,
-    time: Optional[str] = None,
+    time: str | None = None,
     runtime: ToolRuntime = None
 ) -> str:
     """

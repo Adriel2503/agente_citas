@@ -5,7 +5,6 @@ Valida formato de email, fechas, etc. Para citas se acepta solo email (no teléf
 
 import re
 from datetime import datetime
-from typing import Optional
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, Field, field_validator
@@ -155,7 +154,7 @@ class BookingData(BaseModel):
 
 # ========== FUNCIONES DE UTILIDAD ==========
 
-def validate_contact(contact: str) -> tuple[bool, Optional[str]]:
+def validate_contact(contact: str) -> tuple[bool, str | None]:
     """
     Valida un contacto y retorna (es_valido, error_mensaje).
 
@@ -170,7 +169,7 @@ def validate_contact(contact: str) -> tuple[bool, Optional[str]]:
         return (False, str(e))
 
 
-def validate_customer_name(name: str) -> tuple[bool, Optional[str]]:
+def validate_customer_name(name: str) -> tuple[bool, str | None]:
     """
     Valida un nombre de cliente y retorna (es_valido, error_mensaje).
 
@@ -185,7 +184,7 @@ def validate_customer_name(name: str) -> tuple[bool, Optional[str]]:
         return (False, str(e))
 
 
-def validate_datetime(date: str, time: str) -> tuple[bool, Optional[str]]:
+def validate_datetime(date: str, time: str) -> tuple[bool, str | None]:
     """
     Valida fecha y hora y retorna (es_valido, error_mensaje).
 
@@ -205,7 +204,7 @@ def validate_booking_data(
     time: str,
     customer_name: str,
     customer_contact: str
-) -> tuple[bool, Optional[str]]:
+) -> tuple[bool, str | None]:
     """
     Valida todos los datos de una cita.
 

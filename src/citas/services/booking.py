@@ -9,7 +9,7 @@ import re
 from datetime import datetime, timedelta
 
 import httpx
-from typing import Any, Dict
+from typing import Any
 
 try:
     from ..logger import get_logger
@@ -65,7 +65,7 @@ async def confirm_booking(
     duracion_cita_minutos: int = 60,
     correo_usuario: str = "",
     log_create_booking_apis: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Crea un evento en el calendario (ws_calendario.php, CREAR_EVENTO).
 

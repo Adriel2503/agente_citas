@@ -4,7 +4,7 @@ Formato Pregunta/Respuesta para que el modelo entienda y use las FAQs.
 """
 
 import asyncio
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from cachetools import TTLCache
 
@@ -27,10 +27,10 @@ logger = get_logger(__name__)
 _preguntas_cache: TTLCache = TTLCache(maxsize=500, ttl=3600)
 
 # Lock por id_chatbot para evitar thundering herd (mismo patrón que horario_cache).
-_fetch_locks: Dict[Any, asyncio.Lock] = {}
+_fetch_locks: dict[Any, asyncio.Lock] = {}
 
 
-def format_preguntas_frecuentes_para_prompt(items: List[Dict[str, Any]]) -> str:
+def format_preguntas_frecuentes_para_prompt(items: list[dict[str, Any]]) -> str:
     """
     Formatea la lista de FAQs (solo pregunta y respuesta) para inyectar en el system prompt.
     Usa etiquetas "Pregunta:" y "Respuesta:" para que el modelo entienda el formato.
@@ -57,7 +57,7 @@ def format_preguntas_frecuentes_para_prompt(items: List[Dict[str, Any]]) -> str:
     return "\n".join(lineas).strip() if lineas else ""
 
 
-async def fetch_preguntas_frecuentes(id_chatbot: Optional[Any]) -> str:
+async def fetch_preguntas_frecuentes(id_chatbot: Any | None) -> str:
     """
     Obtiene las preguntas frecuentes desde la API para inyectar en el system prompt.
     Usa cache TTL por id_chatbot. Body: {"id_chatbot": id_chatbot}.
