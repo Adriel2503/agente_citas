@@ -78,8 +78,8 @@ def _format_precio(precio: Any) -> str:
 def _format_precio_linea(precio_str: str, es_servicio: bool, unidad: str) -> str:
     """Línea de precio: solo monto para servicio; monto + unidad para producto."""
     if es_servicio:
-        return f"- *Precio:* {precio_str}"
-    return f"- *Precio:* {precio_str} por {unidad}"
+        return f"- Precio: {precio_str}"
+    return f"- Precio: {precio_str} por {unidad}"
 
 
 def _format_item(p: dict[str, Any]) -> list[str]:
@@ -101,10 +101,10 @@ def _format_item(p: dict[str, Any]) -> list[str]:
     linea_precio = _format_precio_linea(precio_str, es_servicio, unidad)
 
     lineas = [
-        f"*{nombre}*",
+        f"### {nombre}",
         linea_precio,
-        f"- *Categoría:* {categoria}",
-        f"- *Descripción:* {descripcion}",
+        f"- Categoría: {categoria}",
+        f"- Descripción: {descripcion}",
         "",
     ]
     return lineas
