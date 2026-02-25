@@ -134,6 +134,7 @@ SCHEDULE_CACHE_TTL_MINUTES: int = _get_int(
 AGENT_CACHE_TTL_MINUTES: int = _get_int(
     "AGENT_CACHE_TTL_MINUTES", 60, min_val=5, max_val=1440
 )
+AGENT_CACHE_MAXSIZE: int = _get_int("AGENT_CACHE_MAXSIZE", 500, min_val=10, max_val=5000)
 
 # ---------------------------------------------------------------------------
 # APIs MaravIA (calendario, agendar reunión, información/horarios)

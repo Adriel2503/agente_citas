@@ -59,7 +59,7 @@ _SESSION_LOCKS_CLEANUP_THRESHOLD = 500  # multiempresa: muchas sesiones; limpiez
 # productos) cambia raramente → TTL largo (default 60 min).
 # La validación de horario usa horario_cache directamente, siempre fresca.
 _agent_cache: TTLCache = TTLCache(
-    maxsize=500,
+    maxsize=app_config.AGENT_CACHE_MAXSIZE,
     ttl=app_config.AGENT_CACHE_TTL_MINUTES * 60,
 )
 # Un lock por cache_key para evitar thundering herd al crear el agente por primera vez.
