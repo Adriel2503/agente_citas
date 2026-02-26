@@ -20,8 +20,7 @@ _EMAIL_PATTERN = re.compile(
 )
 
 # ========== LÓGICA DE VALIDACIÓN (funciones privadas) ==========
-# Centralizadas aquí para que los modelos individuales y BookingData
-# las reutilicen sin instanciar modelos intermedios.
+# Centralizadas aquí para que BookingData las use en sus field_validator.
 
 def _check_email(v: str) -> str:
     v = v.strip()
@@ -75,54 +74,6 @@ def _check_time(v: str) -> str:
 
 # ========== MODELOS PYDANTIC ==========
 
-class ContactInfo(BaseModel):
-    """Valida información de contacto (email para citas)."""
-
-    contact: str = Field(..., description="Email del cliente")
-
-    @field_validator('contact')
-    @classmethod
-    def validate_contact(cls, v: str) -> str:
-        """Valida que sea un email válido. Para citas solo se acepta email."""
-        return _check_email(v)
-
-    @property
-    def is_email(self) -> bool:
-        """Retorna True (siempre, ya que solo aceptamos email para citas)."""
-        return True
-
-
-class CustomerName(BaseModel):
-    """Valida nombre de cliente."""
-
-    name: str = Field(..., min_length=2, max_length=100, description="Nombre del cliente")
-
-    @field_validator('name')
-    @classmethod
-    def validate_name(cls, v: str) -> str:
-        """Valida que el nombre sea válido."""
-        return _check_name(v)
-
-
-class BookingDateTime(BaseModel):
-    """Valida fecha y hora de la cita."""
-
-    date: str = Field(..., description="Fecha en formato YYYY-MM-DD")
-    time: str = Field(..., description="Hora en formato HH:MM AM/PM")
-
-    @field_validator('date')
-    @classmethod
-    def validate_date(cls, v: str) -> str:
-        """Valida formato de fecha."""
-        return _check_date(v)
-
-    @field_validator('time')
-    @classmethod
-    def validate_time(cls, v: str) -> str:
-        """Valida formato de hora."""
-        return _check_time(v)
-
-
 class BookingData(BaseModel):
     """Valida todos los datos necesarios para una cita."""
 
@@ -152,53 +103,6 @@ class BookingData(BaseModel):
         return _check_time(v)
 
 
-# ========== FUNCIONES DE UTILIDAD ==========
-
-def validate_contact(contact: str) -> tuple[bool, str | None]:
-    """
-    Valida un contacto y retorna (es_valido, error_mensaje).
-
-    Returns:
-        (True, None) si es válido
-        (False, mensaje_error) si no es válido
-    """
-    try:
-        ContactInfo(contact=contact)
-        return (True, None)
-    except ValueError as e:
-        return (False, str(e))
-
-
-def validate_customer_name(name: str) -> tuple[bool, str | None]:
-    """
-    Valida un nombre de cliente y retorna (es_valido, error_mensaje).
-
-    Returns:
-        (True, None) si es válido
-        (False, mensaje_error) si no es válido
-    """
-    try:
-        CustomerName(name=name)
-        return (True, None)
-    except ValueError as e:
-        return (False, str(e))
-
-
-def validate_datetime(date: str, time: str) -> tuple[bool, str | None]:
-    """
-    Valida fecha y hora y retorna (es_valido, error_mensaje).
-
-    Returns:
-        (True, None) si es válido
-        (False, mensaje_error) si no es válido
-    """
-    try:
-        BookingDateTime(date=date, time=time)
-        return (True, None)
-    except ValueError as e:
-        return (False, str(e))
-
-
 def validate_booking_data(
     date: str,
     time: str,
@@ -225,12 +129,6 @@ def validate_booking_data(
 
 
 __all__ = [
-    'ContactInfo',
-    'CustomerName',
-    'BookingDateTime',
     'BookingData',
-    'validate_contact',
-    'validate_customer_name',
-    'validate_datetime',
     'validate_booking_data',
 ]
