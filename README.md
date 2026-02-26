@@ -248,9 +248,73 @@ Si el mensaje del usuario contiene URLs de imágenes (`.jpg`, `.jpeg`, `.png`, `
 
 Las tools son el puente entre el LLM y los sistemas externos. El LLM decide autónomamente cuándo y cuáles invocar basándose en el estado de la conversación.
 
+Definidas en `tool/tools.py`. Exportadas como `AGENT_TOOLS = [check_availability, create_booking, search_productos_servicios]`.
+
+### Tabla resumen: origen de cada parámetro
+
+> **🤖 IA** = el LLM decide el valor basándose en la conversación.
+> **🔧 Gateway** = viene de `context.config` enviado por el gateway Go (originado en N8N).
+> **⚙️ Runtime** = inyectado automáticamente por LangChain vía `ToolRuntime` (el LLM no lo ve).
+
+| Tool | Parámetro | Tipo | Origen | Ejemplo |
+|------|-----------|------|--------|---------|
+| `check_availability` | `date` | `str` | 🤖 IA | `"2026-02-28"` |
+| | `time` | `str \| None` | 🤖 IA | `"3:00 PM"` o `None` |
+| | `runtime.context` | `AgentContext` | ⚙️ Runtime | (inyectado) |
+| `create_booking` | `date` | `str` | 🤖 IA | `"2026-02-28"` |
+| | `time` | `str` | 🤖 IA | `"3:00 PM"` |
+| | `customer_name` | `str` | 🤖 IA | `"Juan Pérez"` |
+| | `customer_contact` | `str` | 🤖 IA | `"juan@ejemplo.com"` |
+| | `runtime.context` | `AgentContext` | ⚙️ Runtime | (inyectado) |
+| `search_productos_servicios` | `busqueda` | `str` | 🤖 IA | `"NovaX"` |
+| | `runtime.context` | `AgentContext` | ⚙️ Runtime | (inyectado) |
+
+### `AgentContext` — datos del gateway inyectados a todas las tools
+
+```python
+@dataclass
+class AgentContext:
+    id_empresa: int              # 🔧 Gateway (requerido)
+    duracion_cita_minutos: int   # 🔧 Gateway (default: 60)
+    slots: int                   # 🔧 Gateway (default: 60)
+    agendar_usuario: int         # 🔧 Gateway (default: 1) — 1=asignar vendedor
+    usuario_id: int              # 🔧 Gateway (default: 1) — ID del vendedor
+    correo_usuario: str          # 🔧 Gateway (default: "") — email del vendedor
+    agendar_sucursal: int        # 🔧 Gateway (default: 0)
+    id_prospecto: int            # = session_id (número WhatsApp)
+    session_id: int              # = session_id del request
+```
+
+Cada tool accede al contexto así:
+```python
+@tool
+async def check_availability(date: str, time: str | None = None, runtime: ToolRuntime = None) -> str:
+    ctx = runtime.context  # → AgentContext
+    id_empresa = ctx.id_empresa
+```
+
+---
+
 ### `check_availability(date, time?)`
 
 **Cuándo lo usa el LLM:** El cliente pregunta por disponibilidad sin haber dado todos los datos para agendar, o quiere verificar si un horario específico está libre.
+
+**Parámetros que decide la IA:**
+
+| Parámetro | Formato | Obligatorio | Cómo lo obtiene el LLM |
+|-----------|---------|-------------|------------------------|
+| `date` | `YYYY-MM-DD` | ✅ | Traduce "mañana", "el viernes", "15 de marzo" a ISO usando `fecha_iso` del prompt |
+| `time` | `HH:MM AM/PM` | ❌ | Extrae de "a las 3pm" → `"3:00 PM"`. Si no hay hora, pasa `None` |
+
+**Parámetros que saca del contexto (gateway):**
+
+| Parámetro del contexto | Para qué se usa |
+|------------------------|-----------------|
+| `id_empresa` | Identificar la empresa en la API |
+| `duracion_cita_minutos` | Calcular `fecha_fin` en CONSULTAR_DISPONIBILIDAD |
+| `slots` | Pasar a la API (configuración de slots de la empresa) |
+| `agendar_usuario` | Pasar a la API (filtrar por vendedor o no) |
+| `agendar_sucursal` | Pasar a la API (filtrar por sucursal o no) |
 
 **Lógica interna:**
 
@@ -266,22 +330,91 @@ Si NO viene time (solo fecha o pregunta general):
   └─ Fallback si API falla → "Indica una fecha y hora y la verifico"
 ```
 
-**APIs que llama:**
-- `ws_agendar_reunion.php` con `codOpe: "SUGERIR_HORARIOS"` — devuelve hasta N slots disponibles para hoy y mañana.
-- `ws_agendar_reunion.php` con `codOpe: "CONSULTAR_DISPONIBILIDAD"` — verifica un slot concreto.
+**APIs que llama (payloads exactos):**
+
+**Caso 1 — Con hora → `CONSULTAR_DISPONIBILIDAD`:**
+```json
+{
+  "codOpe": "CONSULTAR_DISPONIBILIDAD",
+  "id_empresa": 42,
+  "fecha_inicio": "2026-02-28 15:00:00",
+  "fecha_fin": "2026-02-28 16:00:00",
+  "slots": 60,
+  "agendar_usuario": 1,
+  "agendar_sucursal": 0
+}
+```
+→ Respuesta: `{"success": true, "disponible": true}` o `{"success": true, "disponible": false}`
+
+**Caso 2 — Sin hora → `SUGERIR_HORARIOS`:**
+```json
+{
+  "codOpe": "SUGERIR_HORARIOS",
+  "id_empresa": 42,
+  "duracion_minutos": 60,
+  "slots": 60,
+  "agendar_usuario": 1,
+  "agendar_sucursal": 0
+}
+```
+→ Respuesta:
+```json
+{
+  "success": true,
+  "mensaje": "Horarios disponibles encontrados",
+  "total": 5,
+  "sugerencias": [
+    {"dia": "hoy", "hora_legible": "3:00 PM", "disponible": true, "fecha_inicio": "2026-02-26 15:00:00"},
+    {"dia": "mañana", "hora_legible": "10:00 AM", "disponible": true, "fecha_inicio": "2026-02-27 10:00:00"}
+  ]
+}
+```
+
+**Endpoint:** `ws_agendar_reunion.php` (`API_AGENDAR_REUNION_URL`)
+**Circuit breaker:** `agendar_reunion_cb` (keyed by `id_empresa`)
+
+---
 
 ### `create_booking(date, time, customer_name, customer_contact)`
 
 **Cuándo lo usa el LLM:** Tiene los 4 datos requeridos: fecha, hora, nombre completo y email del cliente.
 
+**Parámetros que decide la IA:**
+
+| Parámetro | Formato | Validación | Cómo lo obtiene el LLM |
+|-----------|---------|------------|------------------------|
+| `date` | `YYYY-MM-DD` | Pydantic: no pasado, formato ISO | De la conversación previa con el cliente |
+| `time` | `HH:MM AM/PM` | Pydantic: formato 12h o 24h | De la conversación previa con el cliente |
+| `customer_name` | `str` | ≥2 chars, sin números, sin caracteres peligrosos | El cliente dice "Soy Juan Pérez" |
+| `customer_contact` | `email` | Regex RFC 5322 simplificado | El cliente da su email |
+
+**Parámetros que saca del contexto (gateway):**
+
+| Parámetro del contexto | Campo en payload CREAR_EVENTO | Cómo llega |
+|------------------------|-------------------------------|------------|
+| `usuario_id` | `usuario_id` | `context.config.usuario_id` del gateway |
+| `session_id` | `id_prospecto` | `session_id` del request (nro WhatsApp) |
+| `correo_usuario` | `correo_usuario` | `context.config.correo_usuario` del gateway |
+| `agendar_usuario` | `agendar_usuario` | `context.config.agendar_usuario` del gateway |
+| `duracion_cita_minutos` | Cálculo de `fecha_fin` | `context.config.duracion_cita_minutos` del gateway |
+
+**Parámetros calculados por el código (ni IA ni gateway):**
+
+| Campo en payload | Cómo se calcula |
+|-----------------|-----------------|
+| `titulo` | `f"Reunion para el usuario: {customer_name}"` — construido por código, no por LLM |
+| `fecha_inicio` | `date + _parse_time_to_24h(time)` → `"2026-02-28 15:00:00"` |
+| `fecha_fin` | `fecha_inicio + duracion_cita_minutos` → `"2026-02-28 16:00:00"` |
+| `correo_cliente` | `customer_contact` (viene de la IA, pasa directo) |
+
 **Pipeline de 3 fases:**
 
 ```
-Fase 1 — Validación de datos (Pydantic + regex)
-  ├─ date: formato YYYY-MM-DD
+Fase 1 — Validación de datos (Pydantic + regex en validation.py)
+  ├─ date: formato YYYY-MM-DD, no en el pasado
   ├─ time: HH:MM AM/PM o HH:MM 24h
-  ├─ customer_name: no vacío, sin caracteres peligrosos
-  └─ customer_contact: email válido
+  ├─ customer_name: ≥2 chars, sin números, solo letras/espacios/acentos
+  └─ customer_contact: email válido (RFC 5322 simplificado)
 
 Fase 2 — Validación de horario (ScheduleValidator.validate, 12 pasos)
   ├─ Parsea fecha y hora
@@ -293,27 +426,54 @@ Fase 2 — Validación de horario (ScheduleValidator.validate, 12 pasos)
   ├─ Verifica horarios bloqueados (bloqueos específicos)
   └─ CONSULTAR_DISPONIBILIDAD → ¿está libre ese slot?
 
-Fase 3 — Creación del evento (confirm_booking)
-  └─ ws_calendario.php CREAR_EVENTO
+Fase 3 — Creación del evento (confirm_booking → ws_calendario.php)
+  └─ CREAR_EVENTO
       ├─ Éxito + Google Meet link → respuesta con enlace
       ├─ Éxito sin Meet → "Cita confirmada. Te contactaremos con detalles"
       └─ Fallo → mensaje de error del API
 ```
 
-**Parámetros enviados a `CREAR_EVENTO`:**
+**Payload exacto enviado a `CREAR_EVENTO`:**
 
-| Campo | Origen |
-|-------|--------|
-| `usuario_id` | `context.config.usuario_id` (identificador del vendedor en N8N) |
-| `id_prospecto` | `session_id` (número de WhatsApp del cliente) |
-| `titulo` | Fijo: `"Reunion para el usuario: {nombre_completo}"` |
-| `fecha_inicio` | Calculado: `fecha + hora` en `YYYY-MM-DD HH:MM:SS` |
-| `fecha_fin` | `fecha_inicio + duracion_cita_minutos` |
-| `correo_cliente` | `customer_contact` (email dado por el cliente) |
-| `correo_usuario` | `context.config.correo_usuario` (email del vendedor, para invitación) |
-| `agendar_usuario` | `context.config.agendar_usuario` (bandera de asignación automática) |
+```json
+{
+  "codOpe": "CREAR_EVENTO",
+  "usuario_id": 7,
+  "id_prospecto": 5191234567890,
+  "titulo": "Reunion para el usuario: Juan Pérez",
+  "fecha_inicio": "2026-02-28 15:00:00",
+  "fecha_fin": "2026-02-28 16:00:00",
+  "correo_cliente": "juan@ejemplo.com",
+  "correo_usuario": "vendedor@empresa.com",
+  "agendar_usuario": 1
+}
+```
 
-**Nota de diseño:** El campo `titulo` lo construye el código, no el LLM. Esto evita que el LLM inyecte texto arbitrario en el calendario de la empresa.
+→ Respuesta exitosa:
+```json
+{
+  "success": true,
+  "message": "Evento agregado correctamente",
+  "google_meet_link": "https://meet.google.com/abc-defg-hij",
+  "google_calendar_synced": true
+}
+```
+
+→ Respuesta sin Google Calendar:
+```json
+{
+  "success": true,
+  "message": "Evento agregado correctamente",
+  "google_calendar_synced": false
+}
+```
+
+**Endpoint:** `ws_calendario.php` (`API_CALENDAR_URL`)
+**Circuit breaker:** `calendario_cb` (key fija `"global"`)
+
+**Nota de diseño:** El campo `titulo` lo construye el código, no el LLM. Esto evita que el LLM inyecte texto arbitrario en el calendario de la empresa. `confirm_booking` usa `client.post()` directo (sin `post_with_retry`) porque CREAR_EVENTO no es idempotente — un retry podría duplicar el evento.
+
+---
 
 ### `search_productos_servicios(busqueda)`
 
@@ -321,7 +481,65 @@ Fase 3 — Creación del evento (confirm_booking)
 
 El system prompt ya incluye la **lista de nombres** de productos y servicios (cargada al crear el agente). Esta tool se usa para búsqueda en profundidad cuando el cliente quiere detalles específicos.
 
-**Comportamiento:** Llama a `ws_informacion_ia.php` con `codOpe: "BUSCAR_PRODUCTOS_SERVICIOS"` y devuelve hasta 10 resultados formateados (nombre, precio, categoría, descripción).
+**Parámetros que decide la IA:**
+
+| Parámetro | Formato | Cómo lo obtiene el LLM |
+|-----------|---------|------------------------|
+| `busqueda` | `str` (texto libre) | El cliente dice "¿cuánto cuesta NovaX?" → `"NovaX"` |
+
+**Parámetros que saca del contexto (gateway):**
+
+| Parámetro del contexto | Para qué se usa |
+|------------------------|-----------------|
+| `id_empresa` | Filtrar productos/servicios por empresa |
+
+**Payload exacto enviado a `BUSCAR_PRODUCTOS_SERVICIOS_CITAS`:**
+
+```json
+{
+  "codOpe": "BUSCAR_PRODUCTOS_SERVICIOS_CITAS",
+  "id_empresa": 42,
+  "busqueda": "NovaX",
+  "limite": 10
+}
+```
+
+→ Respuesta:
+```json
+{
+  "success": true,
+  "productos": [
+    {
+      "nombre": "NovaX Pro",
+      "precio_unitario": 99.90,
+      "nombre_categoria": "Software",
+      "descripcion": "<p>Plataforma de gestión...</p>",
+      "nombre_tipo_producto": "Producto",
+      "nombre_unidad": "licencia"
+    }
+  ]
+}
+```
+
+**Formato de respuesta al LLM** (generado por `format_productos_para_respuesta`):
+```
+### NovaX Pro
+- Precio: S/. 99.90 por licencia
+- Categoría: Software
+- Descripción: Plataforma de gestión...
+```
+
+Para servicios (`nombre_tipo_producto: "Servicio"`), el formato omite la unidad:
+```
+### Consultoría Empresarial
+- Precio: S/. 250.00
+- Categoría: Asesoría
+- Descripción: Sesión de consultoría personalizada...
+```
+
+**Endpoint:** `ws_informacion_ia.php` (`API_INFORMACION_URL`)
+**Circuit breaker:** `informacion_cb` (keyed by `id_empresa`)
+**Cache:** TTLCache 15 min por `(id_empresa, busqueda.lower())` — máx 2000 entradas
 
 ---
 
@@ -385,12 +603,13 @@ results = await asyncio.gather(
 
 El agente usa **4 capas de caché** independientes, con TTLs distintos según la frecuencia de cambio de cada dato.
 
-| Caché | Módulo | Clave | TTL | Propósito |
-|-------|--------|-------|-----|-----------|
-| `_agent_cache` | `agent.py` | `id_empresa` | `AGENT_CACHE_TTL_MINUTES` (60 min) | Agente compilado (grafo LangGraph + system prompt) |
-| `_horario_cache` | `horario_cache.py` | `id_empresa` | `SCHEDULE_CACHE_TTL_MINUTES` (5 min) | Horario de reuniones por empresa |
-| `_contexto_cache` | `contexto_negocio.py` | `id_empresa` | 1 hora | Descripción y contexto de la empresa |
-| `_preguntas_cache` | `preguntas_frecuentes.py` | `id_chatbot` | 1 hora | FAQs del chatbot |
+| Caché | Módulo | Clave | Maxsize | TTL | Propósito |
+|-------|--------|-------|---------|-----|-----------|
+| `_agent_cache` | `agent.py` | `(id_empresa,)` | 500 | `AGENT_CACHE_TTL_MINUTES` (60 min) | Agente compilado (grafo LangGraph + system prompt) |
+| `_horario_cache` | `horario_cache.py` | `id_empresa` | 500 | `SCHEDULE_CACHE_TTL_MINUTES` (5 min) | Horario de reuniones por empresa |
+| `_contexto_cache` | `contexto_negocio.py` | `id_empresa` | 500 | 1 hora | Descripción y contexto de la empresa |
+| `_preguntas_cache` | `preguntas_frecuentes.py` | `id_chatbot` | 500 | 1 hora | FAQs del chatbot |
+| `_busqueda_cache` | `busqueda_productos.py` | `(id_empresa, busqueda)` | 2000 | 15 min | Resultados de búsqueda de productos/servicios |
 
 ### Por qué dos TTLs distintos para agente y horario
 
@@ -438,13 +657,14 @@ CLOSED (normal) → [threshold TransportErrors] → OPEN (fallo rápido)
 OPEN → [reset_ttl segundos sin llamadas] → CLOSED (auto-reset por TTL)
 ```
 
-### Tres singletons
+### Cuatro singletons
 
 | Singleton | API protegida | Clave | Quién lo usa |
 |-----------|--------------|-------|--------------|
 | `informacion_cb` | `ws_informacion_ia.php` | `id_empresa` | `horario_cache`, `contexto_negocio`, `productos_servicios_citas`, `busqueda_productos` |
 | `preguntas_cb` | `ws_preguntas_frecuentes.php` | `id_chatbot` | `preguntas_frecuentes` |
 | `calendario_cb` | `ws_calendario.php` | `"global"` | `booking` |
+| `agendar_reunion_cb` | `ws_agendar_reunion.php` | `id_empresa` | `schedule_validator` (CONSULTAR_DISPONIBILIDAD, SUGERIR_HORARIOS) |
 
 `calendario_cb` usa clave fija `"global"` porque `ws_calendario.php` es un servicio compartido de la plataforma MaravIA — si cae, cae para todas las empresas.
 
@@ -460,9 +680,10 @@ OPEN → [reset_ttl segundos sin llamadas] → CLOSED (auto-reset por TTL)
 ### Reporte en `/health`
 
 ```python
-if informacion_cb.any_open():  issues.append("informacion_api_degraded")
-if preguntas_cb.any_open():    issues.append("preguntas_api_degraded")
-if calendario_cb.any_open():   issues.append("calendario_api_degraded")
+if informacion_cb.any_open():       issues.append("informacion_api_degraded")
+if preguntas_cb.any_open():         issues.append("preguntas_api_degraded")
+if calendario_cb.any_open():        issues.append("calendario_api_degraded")
+if agendar_reunion_cb.any_open():   issues.append("agendar_reunion_api_degraded")
 ```
 
 Con cualquier issue activo, `/health` devuelve `HTTP 503` en lugar de `200`.
@@ -616,6 +837,7 @@ Issues posibles:
 - `informacion_api_degraded` — circuit breaker de `ws_informacion_ia` abierto
 - `preguntas_api_degraded` — circuit breaker de `ws_preguntas_frecuentes` abierto
 - `calendario_api_degraded` — circuit breaker de `ws_calendario` abierto
+- `agendar_reunion_api_degraded` — circuit breaker de `ws_agendar_reunion` abierto
 
 **Importante:** El endpoint **no hace llamadas HTTP** a las APIs externas. Usa únicamente el estado en memoria del circuit breaker. Latencia < 1ms.
 
@@ -645,6 +867,9 @@ Métricas Prometheus en formato text/plain. Diseñado para ser scrapeado por Pro
 | `HTTP_RETRY_WAIT_MAX` | ❌ | `4` | 1–60 seg | Espera máxima entre reintentos |
 | `SCHEDULE_CACHE_TTL_MINUTES` | ❌ | `5` | 1–1440 min | TTL del cache de horarios de reunión |
 | `AGENT_CACHE_TTL_MINUTES` | ❌ | `60` | 5–1440 min | TTL del agente compilado (system prompt) |
+| `AGENT_CACHE_MAXSIZE` | ❌ | `500` | 10–5000 | Máximo de agentes cacheados (por id_empresa) |
+| `CB_THRESHOLD` | ❌ | `3` | 1–20 | Errores de red consecutivos para abrir el circuit breaker |
+| `CB_RESET_TTL` | ❌ | `300` | 60–3600 seg | Tiempo de auto-reset del circuit breaker |
 | `LOG_LEVEL` | ❌ | `INFO` | DEBUG/INFO/WARNING/ERROR/CRITICAL | Nivel de logging |
 | `LOG_FILE` | ❌ | `""` | path | Archivo de log (vacío = solo stdout) |
 | `TIMEZONE` | ❌ | `America/Lima` | zoneinfo key | Zona horaria para fechas en prompts y validaciones |
@@ -660,49 +885,280 @@ Todas las variables son leídas en `config/config.py` con validación de tipos y
 
 ## 14. Integraciones externas (APIs MaravIA)
 
-### `ws_informacion_ia.php`
+Todas las APIs externas son PHP endpoints de MaravIA. Se comunican vía POST JSON con un campo `codOpe` que identifica la operación. Cada operación tiene su circuit breaker y patrón de resiliencia.
+
+### Resumen de operaciones
+
+| Endpoint PHP | `codOpe` | Módulo que lo llama | CB | Cuándo se ejecuta |
+|-------------|----------|--------------------|----|-------------------|
+| `ws_informacion_ia.php` | `OBTENER_HORARIO_REUNIONES` | `horario_cache.py` | `informacion_cb` | Cache miss al crear agente o validar cita |
+| | `OBTENER_CONTEXTO_NEGOCIO` | `contexto_negocio.py` | `informacion_cb` | Cache miss al crear agente |
+| | `OBTENER_PRODUCTOS_CITAS` | `productos_servicios_citas.py` | `informacion_cb` | Cache miss al crear agente |
+| | `OBTENER_SERVICIOS_CITAS` | `productos_servicios_citas.py` | `informacion_cb` | Cache miss al crear agente |
+| | `BUSCAR_PRODUCTOS_SERVICIOS_CITAS` | `busqueda_productos.py` | `informacion_cb` | Tool `search_productos_servicios` |
+| `ws_agendar_reunion.php` | `SUGERIR_HORARIOS` | `schedule_validator.py` | `agendar_reunion_cb` | Tool `check_availability` sin hora |
+| | `CONSULTAR_DISPONIBILIDAD` | `schedule_validator.py` | `agendar_reunion_cb` | Tool `check_availability` con hora; o paso 12 de `create_booking` |
+| `ws_calendario.php` | `CREAR_EVENTO` | `booking.py` | `calendario_cb` | Tool `create_booking` (fase 3) |
+| `ws_preguntas_frecuentes.php` | _(sin codOpe)_ | `preguntas_frecuentes.py` | `preguntas_cb` | Cache miss al crear agente |
+
+---
+
+### `ws_informacion_ia.php` — datos de la empresa
 
 Fuente de verdad de datos de la empresa. Protegida por `informacion_cb` keyed por `id_empresa`.
 
-| `codOpe` | Cuándo | Payload | Respuesta clave |
-|----------|--------|---------|-----------------|
-| `OBTENER_HORARIO_REUNIONES` | Al crear el agente o validar cita (TTLCache miss) | `{id_empresa}` | `horario_reuniones` (dict de días) |
-| `OBTENER_CONTEXTO_NEGOCIO` | Al crear el agente (TTLCache miss) | `{id_empresa}` | Texto descriptivo de la empresa |
-| `BUSCAR_PRODUCTOS_SERVICIOS` | Tool `search_productos_servicios` (sin cache, real-time) | `{id_empresa, busqueda, limite}` | Lista de productos/servicios |
+#### `OBTENER_HORARIO_REUNIONES`
 
-### `ws_agendar_reunion.php`
+```json
+// Request
+{"codOpe": "OBTENER_HORARIO_REUNIONES", "id_empresa": 42}
 
-Gestión de disponibilidad de agenda. Sin circuit breaker propio (comparte `informacion_cb` via reintentos).
+// Response
+{
+  "success": true,
+  "horario_reuniones": {
+    "reunion_lunes": "09:00-18:00",
+    "reunion_martes": "09:00-18:00",
+    "reunion_miercoles": "09:00-18:00",
+    "reunion_jueves": "09:00-18:00",
+    "reunion_viernes": "09:00-17:00",
+    "reunion_sabado": "NO DISPONIBLE",
+    "reunion_domingo": null,
+    "horarios_bloqueados": ""
+  }
+}
+```
 
-| `codOpe` | Cuándo | Payload |
-|----------|--------|---------|
-| `SUGERIR_HORARIOS` | `check_availability` sin hora específica | `{id_empresa, duracion_minutos, slots, agendar_usuario, agendar_sucursal}` |
-| `CONSULTAR_DISPONIBILIDAD` | `check_availability` con hora O `create_booking` (paso 12 de validación) | `{id_empresa, fecha_inicio, fecha_fin, slots, agendar_usuario, agendar_sucursal}` |
+**Uso:** Sistema prompt (formateado como lista por día) + `ScheduleValidator.validate()` (pasos 5-11).
+**Cache:** `_horario_cache` — TTL `SCHEDULE_CACHE_TTL_MINUTES` (5 min).
 
-**Degradación graceful:** Si `CONSULTAR_DISPONIBILIDAD` falla, el validador asume disponible. La cita se crea; un posible doble-booking es preferible a perder la conversión.
+#### `OBTENER_CONTEXTO_NEGOCIO`
 
-### `ws_calendario.php`
+```json
+// Request
+{"codOpe": "OBTENER_CONTEXTO_NEGOCIO", "id_empresa": 42}
+
+// Response
+{"success": true, "contexto_negocio": "Somos una empresa dedicada a..."}
+```
+
+**Uso:** Inyectado en el system prompt (sección "Información del negocio").
+**Cache:** `_contexto_cache` — TTL 1 hora.
+
+#### `OBTENER_PRODUCTOS_CITAS` / `OBTENER_SERVICIOS_CITAS`
+
+```json
+// Request (productos)
+{"codOpe": "OBTENER_PRODUCTOS_CITAS", "id_empresa": 42}
+
+// Request (servicios)
+{"codOpe": "OBTENER_SERVICIOS_CITAS", "id_empresa": 42}
+
+// Response (ambos)
+{
+  "success": true,
+  "productos": [{"nombre": "NovaX Pro"}, {"nombre": "ProductoY"}]
+}
+```
+
+**Uso:** Solo los **nombres** se inyectan al system prompt (`"Productos: NovaX Pro, ProductoY"`). El LLM sabe qué existe; para detalles usa la tool `search_productos_servicios`.
+**Llamadas:** 2 en paralelo (`asyncio.gather`) al crear agente. Máx 10 productos + 10 servicios.
+
+#### `BUSCAR_PRODUCTOS_SERVICIOS_CITAS`
+
+```json
+// Request
+{"codOpe": "BUSCAR_PRODUCTOS_SERVICIOS_CITAS", "id_empresa": 42, "busqueda": "NovaX", "limite": 10}
+
+// Response
+{
+  "success": true,
+  "productos": [
+    {
+      "nombre": "NovaX Pro",
+      "precio_unitario": 99.90,
+      "nombre_categoria": "Software",
+      "descripcion": "<p>Plataforma de gestión empresarial</p>",
+      "nombre_tipo_producto": "Producto",
+      "nombre_unidad": "licencia"
+    }
+  ]
+}
+```
+
+**Uso:** Invocada por la tool `search_productos_servicios` en tiempo real.
+**Cache:** `_busqueda_cache` — TTL 15 min por `(id_empresa, busqueda.lower())`, máx 2000 entradas.
+
+---
+
+### `ws_agendar_reunion.php` — disponibilidad de agenda
+
+Gestión de disponibilidad. Protegida por `agendar_reunion_cb` keyed por `id_empresa`.
+
+#### `SUGERIR_HORARIOS`
+
+```json
+// Request
+{
+  "codOpe": "SUGERIR_HORARIOS",
+  "id_empresa": 42,
+  "duracion_minutos": 60,
+  "slots": 60,
+  "agendar_usuario": 1,
+  "agendar_sucursal": 0
+}
+
+// Response
+{
+  "success": true,
+  "mensaje": "Horarios disponibles encontrados",
+  "total": 5,
+  "sugerencias": [
+    {"dia": "hoy", "hora_legible": "3:00 PM", "disponible": true, "fecha_inicio": "2026-02-26 15:00:00"},
+    {"dia": "mañana", "hora_legible": "10:00 AM", "disponible": true, "fecha_inicio": "2026-02-27 10:00:00"}
+  ]
+}
+```
+
+**Limitación:** Solo devuelve slots para **hoy y mañana**. Para otras fechas se usa `CONSULTAR_DISPONIBILIDAD` con hora específica.
+
+#### `CONSULTAR_DISPONIBILIDAD`
+
+```json
+// Request
+{
+  "codOpe": "CONSULTAR_DISPONIBILIDAD",
+  "id_empresa": 42,
+  "fecha_inicio": "2026-02-28 15:00:00",
+  "fecha_fin": "2026-02-28 16:00:00",
+  "slots": 60,
+  "agendar_usuario": 1,
+  "agendar_sucursal": 0
+}
+
+// Response
+{"success": true, "disponible": true}
+```
+
+**Degradación graceful:** Si falla por timeout, error HTTP o circuit abierto, el validador retorna `available: true`. La cita se crea igualmente. Prioriza conversión sobre consistencia perfecta; un posible doble-booking es preferible a perder un prospecto.
+
+---
+
+### `ws_calendario.php` — creación de eventos
 
 Creación de eventos. Protegida por `calendario_cb` con clave global.
 
-| `codOpe` | Cuándo | Resultado |
-|----------|--------|-----------|
-| `CREAR_EVENTO` | `create_booking` (fase 3) | `{success, message, google_meet_link?, google_calendar_synced}` |
+#### `CREAR_EVENTO`
 
-Si la empresa tiene Google Calendar configurado, la respuesta incluye `google_meet_link` con la URL de la videollamada. El agente la entrega al usuario en el reply.
+```json
+// Request
+{
+  "codOpe": "CREAR_EVENTO",
+  "usuario_id": 7,
+  "id_prospecto": 5191234567890,
+  "titulo": "Reunion para el usuario: Juan Pérez",
+  "fecha_inicio": "2026-02-28 15:00:00",
+  "fecha_fin": "2026-02-28 16:00:00",
+  "correo_cliente": "juan@ejemplo.com",
+  "correo_usuario": "vendedor@empresa.com",
+  "agendar_usuario": 1
+}
 
-### `ws_preguntas_frecuentes.php`
+// Response (con Google Calendar)
+{
+  "success": true,
+  "message": "Evento agregado correctamente",
+  "google_meet_link": "https://meet.google.com/abc-defg-hij",
+  "google_calendar_synced": true
+}
+
+// Response (sin Google Calendar)
+{
+  "success": true,
+  "message": "Evento agregado correctamente",
+  "google_calendar_synced": false
+}
+```
+
+**Importante:** `CREAR_EVENTO` usa `client.post()` directo (sin `post_with_retry`) porque **no es idempotente** — un retry podría duplicar el evento en el calendario.
+
+| Campo del payload | Origen | Descripción |
+|-------------------|--------|-------------|
+| `usuario_id` | 🔧 Gateway (`config.usuario_id`) | ID del vendedor que registra la cita |
+| `id_prospecto` | ⚙️ Runtime (`session_id`) | Número de WhatsApp del cliente |
+| `titulo` | 🔒 Código (hardcoded) | `"Reunion para el usuario: {nombre}"` — no editable por LLM |
+| `fecha_inicio` | 🔢 Calculado | `date + _parse_time_to_24h(time)` |
+| `fecha_fin` | 🔢 Calculado | `fecha_inicio + duracion_cita_minutos` |
+| `correo_cliente` | 🤖 IA (`customer_contact`) | Email del cliente (extraído de la conversación) |
+| `correo_usuario` | 🔧 Gateway (`config.correo_usuario`) | Email del vendedor (para invitación) |
+| `agendar_usuario` | 🔧 Gateway (`config.agendar_usuario`) | 1=asignar vendedor automáticamente |
+
+---
+
+### `ws_preguntas_frecuentes.php` — FAQs del chatbot
 
 FAQs del chatbot. Protegida por `preguntas_cb` keyed por `id_chatbot`.
 
-Recibe `{id_chatbot}` sin `codOpe`. Retorna lista de `{pregunta, respuesta}` que se formatea como `Pregunta: / Respuesta:` para inyectar en el system prompt.
+```json
+// Request (sin codOpe)
+{"id_chatbot": 15}
+
+// Response
+{
+  "success": true,
+  "preguntas_frecuentes": [
+    {"pregunta": "¿Qué es NovaX?", "respuesta": "Es una plataforma de gestión..."},
+    {"pregunta": "¿Cuál es el horario de atención?", "respuesta": "De lunes a viernes de 9am a 6pm"}
+  ]
+}
+```
+
+**Formato inyectado al prompt:**
+```
+Pregunta: ¿Qué es NovaX?
+Respuesta: Es una plataforma de gestión...
+
+Pregunta: ¿Cuál es el horario de atención?
+Respuesta: De lunes a viernes de 9am a 6pm
+```
+
+**Cache:** `_preguntas_cache` — TTL 1 hora por `id_chatbot`.
+
+---
 
 ### `post_with_retry` — cliente HTTP compartido
 
-Todas las llamadas de lectura usan `post_with_retry()` de `http_client.py`:
-- Cliente `httpx.AsyncClient` singleton compartido entre todos los requests (sin overhead de conexión TCP).
+Todas las llamadas de **lectura** usan `post_with_retry()` de `http_client.py`:
+- Cliente `httpx.AsyncClient` singleton compartido entre todos los requests (connection pool reusado).
 - Reintentos con backoff exponencial: `HTTP_RETRY_ATTEMPTS` veces (default 3), espera entre `HTTP_RETRY_WAIT_MIN` y `HTTP_RETRY_WAIT_MAX` segundos.
-- Solo reintenta ante `httpx.TransportError` (errores de red). Los errores HTTP (4xx, 5xx) no se reintentan.
+- Solo reintenta ante `httpx.TransportError` (errores de red). Los errores HTTP (4xx, 5xx) **no** se reintentan.
+- `CREAR_EVENTO` **no** usa `post_with_retry` (riesgo de duplicados).
+
+**Configuración del cliente:**
+```python
+httpx.AsyncClient(
+    timeout=httpx.Timeout(connect=5.0, read=API_TIMEOUT, write=5.0, pool=2.0),
+    limits=httpx.Limits(max_connections=50, max_keepalive_connections=20, keepalive_expiry=30.0),
+)
+```
+
+### Cadena de resiliencia completa
+
+```
+Tool llamada por LLM
+  └─ buscar_productos_servicios(id_empresa, busqueda)
+      ├─ 1. Cache hit? → return inmediato
+      ├─ 2. Circuit breaker abierto? → error rápido sin tocar la red
+      ├─ 3. Anti-thundering herd: asyncio.Lock por cache_key
+      └─ 4. resilient_call()
+            ├─ CB check (redundante, por si cambió entre 2 y 4)
+            └─ post_with_logging()
+                  └─ post_with_retry()  ← tenacity: 3 intentos, backoff exponencial
+                        └─ httpx.AsyncClient.post()
+                              ├─ Éxito → CB reset, cache write, return
+                              ├─ TransportError → CB record_failure, tenacity retry
+                              └─ HTTPStatusError → no afecta CB, propaga error
+```
 
 ---
 
@@ -733,9 +1189,10 @@ agent_citas/
 │   │   ├── preguntas_frecuentes.py    # fetch_preguntas_frecuentes() con TTLCache + fetch lock
 │   │   ├── horario_reuniones.py       # fetch_horario_reuniones() para system prompt (usa horario_cache)
 │   │   ├── productos_servicios_citas.py  # fetch_nombres_productos_servicios() para system prompt
-│   │   ├── busqueda_productos.py      # buscar_productos_servicios() para tool (sin cache)
-│   │   ├── circuit_breaker.py         # CircuitBreaker: informacion_cb, preguntas_cb, calendario_cb
-│   │   ├── http_client.py             # httpx.AsyncClient singleton + post_with_retry
+│   │   ├── busqueda_productos.py      # buscar_productos_servicios() para tool (TTLCache 15min)
+│   │   ├── circuit_breaker.py         # CircuitBreaker: informacion_cb, preguntas_cb, calendario_cb, agendar_reunion_cb
+│   │   ├── http_client.py             # httpx.AsyncClient singleton + post_with_retry (tenacity)
+│   │   ├── _resilience.py             # resilient_call() — wrapper CB + retry
 │   │   └── __init__.py
 │   │
 │   ├── config/
