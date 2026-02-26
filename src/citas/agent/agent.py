@@ -16,14 +16,12 @@ from pydantic import BaseModel
 
 try:
     from .. import config as app_config
-    from ..config.models import CitaConfig
     from ..tool.tools import AGENT_TOOLS
     from ..logger import get_logger
     from ..metrics import track_chat_response, track_llm_call, record_chat_error, chat_requests_total, AGENT_CACHE
     from ..prompts import build_citas_system_prompt
 except ImportError:
     from citas import config as app_config
-    from citas.config.models import CitaConfig
     from citas.tool.tools import AGENT_TOOLS
     from citas.logger import get_logger
     from citas.metrics import track_chat_response, track_llm_call, record_chat_error, chat_requests_total, AGENT_CACHE
@@ -54,7 +52,7 @@ _model = None
 _session_locks: dict[int, asyncio.Lock] = {}
 _SESSION_LOCKS_CLEANUP_THRESHOLD = 500  # multiempresa: muchas sesiones; limpieza periódica
 
-# Cache de agentes compilados: clave = (id_empresa, personalidad).
+# Cache de agentes compilados: clave = id_empresa.
 # TTL independiente del cache de horarios: el system prompt (contexto negocio, FAQs,
 # productos) cambia raramente → TTL largo (default 60 min).
 # La validación de horario usa horario_cache directamente, siempre fresca.
@@ -63,7 +61,7 @@ _agent_cache: TTLCache = TTLCache(
     ttl=app_config.AGENT_CACHE_TTL_MINUTES * 60,
 )
 # Un lock por cache_key para evitar thundering herd al crear el agente por primera vez.
-# Crece con cada (id_empresa, personalidad) nuevo; se limpia cuando supera _LOCKS_CLEANUP_THRESHOLD.
+# Crece con cada id_empresa nuevo; se limpia cuando supera _LOCKS_CLEANUP_THRESHOLD.
 _agent_cache_locks: dict[tuple, asyncio.Lock] = {}
 _LOCKS_CLEANUP_THRESHOLD = 750  # 1.5x cache maxsize; si se supera, se eliminan locks huérfanos
 
@@ -142,7 +140,7 @@ def _cleanup_stale_agent_locks(current_cache_key: tuple) -> None:
     """
     Elimina locks de _agent_cache_locks cuyas claves ya no están en _agent_cache.
     Solo se ejecuta si el dict supera _LOCKS_CLEANUP_THRESHOLD.
-    Evita crecimiento indefinido cuando hay muchas empresas/personalidades distintas.
+    Evita crecimiento indefinido cuando hay muchas empresas distintas.
     """
     if len(_agent_cache_locks) <= _LOCKS_CLEANUP_THRESHOLD:
         return
@@ -201,7 +199,7 @@ def _get_model():
 
 async def _get_agent(config: dict[str, Any]):
     """
-    Devuelve el agente compilado para la combinación (id_empresa, personalidad).
+    Devuelve el agente compilado para id_empresa.
 
     Utiliza TTLCache para evitar recrear el cliente OpenAI, las HTTP calls
     del prompt y la compilación del grafo LangGraph en cada mensaje. El TTL
@@ -213,12 +211,12 @@ async def _get_agent(config: dict[str, Any]):
     concurrentemente (thundering herd).
 
     Args:
-        config: Diccionario con configuración del agente (personalidad, etc.)
+        config: Diccionario con configuración del agente (id_empresa requerido; personalidad, nombre, etc. opcionales).
 
     Returns:
         Agente configurado con tools y checkpointer
     """
-    cache_key: tuple = (config.get("id_empresa"), config.get("personalidad", ""))
+    cache_key: tuple = (config.get("id_empresa"),)
 
     # Fast path: cache hit (sin await, atómico en asyncio single-thread)
     if cache_key in _agent_cache:
@@ -373,10 +371,7 @@ async def process_cita_message(
             return (f"Error de configuración: {str(e)}", None)
 
         config_data = dict(context.get("config") or {})
-        cita_config = CitaConfig(**config_data)
-
-        if "personalidad" not in config_data or not config_data.get("personalidad"):
-            config_data["personalidad"] = cita_config.personalidad or "amable, profesional y eficiente"
+        config_data.setdefault("personalidad", "amable, profesional y eficiente")
 
         try:
             agent = await _get_agent(config_data)

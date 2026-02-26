@@ -69,7 +69,7 @@ async def build_citas_system_prompt(
     Construye el system prompt del agente de citas.
 
     Args:
-        config: Diccionario con id_empresa, personalidad, etc.
+        config: Diccionario con id_empresa (requerido) y resto de configuración del agente (personalidad, nombre, etc.).
         history: Lista de turnos previos [{"user": "...", "response": "..."}]
 
     Returns:

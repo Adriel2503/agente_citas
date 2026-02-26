@@ -30,7 +30,7 @@ Documentación técnica del microservicio de gestión de citas comerciales.
 | Protocolo | HTTP (FastAPI, puerto 8002) |
 | LLM | GPT-4o-mini (configurable) |
 | Memoria | InMemorySaver (LangGraph) por session_id |
-| Multiempresa | Sí — agente cacheado por (id_empresa, personalidad) |
+| Multiempresa | Sí — agente cacheado por id_empresa |
 | Multimodal | Sí — soporta imágenes vía OpenAI Vision |
 
 ---
@@ -174,7 +174,7 @@ Módulo más complejo. Gestiona el ciclo de vida del agente LangChain, la memori
 ```python
 _checkpointer = InMemorySaver()      # Memoria global por thread_id
 
-# Cache de agentes por (id_empresa, personalidad) — TTL = SCHEDULE_CACHE_TTL_MINUTES * 60
+# Cache de agentes por id_empresa — TTL = SCHEDULE_CACHE_TTL_MINUTES * 60
 _agent_cache: TTLCache = TTLCache(maxsize=100, ttl=...)
 
 # Locks para evitar thundering herd al crear agentes (1 lock por cache_key)
@@ -202,7 +202,7 @@ Contexto runtime inyectado automáticamente en las tools de LangChain:
 
 #### `_get_agent(config)` — Factory con cache
 
-1. **Fast path**: busca en `_agent_cache` por `(id_empresa, personalidad)` → retorna directo si hit
+1. **Fast path**: busca en `_agent_cache` por `id_empresa` → retorna directo si hit
 2. **Slow path** (double-checked locking):
    - Adquiere `asyncio.Lock` por `cache_key` (evita thundering herd)
    - Double-check tras adquirir el lock
@@ -232,7 +232,7 @@ Detecta URLs de imágenes en el mensaje (`.jpg`, `.png`, `.gif`, `.webp`) via re
 2. Registrar métrica: chat_requests_total{empresa_id}
 3. Adquirir asyncio.Lock por session_id
 4. _validate_context(context)  →  requiere context.config.id_empresa
-5. CitaConfig(**config_data)   →  valida/completa personalidad
+5. config_data.setdefault("personalidad", "...") en agent.py
 6. _get_agent(config_data)     →  agente desde cache o nuevo
 7. _prepare_agent_context()    →  construir AgentContext
 8. agent.ainvoke(
@@ -552,7 +552,7 @@ El sistema protege dos recursos críticos con el mismo patrón (double-checked l
 
 | Recurso | Lock | Umbral de limpieza |
 |---------|------|--------------------|
-| Agente compilado por `(id_empresa, personalidad)` | `_agent_cache_locks` | 150 locks |
+| Agente compilado por `id_empresa` | `_agent_cache_locks` | 150 locks |
 | Horario de reuniones por `id_empresa` | `_fetch_locks` | 500 locks |
 
 Algoritmo:
@@ -574,7 +574,7 @@ Limpieza periódica de locks huérfanos cuando se supera el umbral (500 sesiones
 
 | Cache | Implementación | Clave | TTL | Tamaño máx |
 |-------|---------------|-------|-----|------------|
-| Agente compilado | `TTLCache` (cachetools) | `(id_empresa, personalidad)` | `SCHEDULE_CACHE_TTL_MINUTES * 60` | 100 |
+| Agente compilado | `TTLCache` (cachetools) | `id_empresa` | `SCHEDULE_CACHE_TTL_MINUTES * 60` | 100 |
 | Horario de reuniones | Dict + threading.Lock | `id_empresa` | `SCHEDULE_CACHE_TTL_MINUTES` min | ilimitado |
 | Contexto de negocio | `TTLCache` (cachetools) | `id_empresa` | 3600s (1h) | 500 |
 | Circuit breaker contexto | `TTLCache` (cachetools) | `id_empresa` | 300s (5 min, auto-reset) | 500 |
@@ -678,10 +678,10 @@ process_cita_message()
   ├─ chat_requests_total{empresa_id=100}.inc()
   ├─ [asyncio.Lock session 12345]
   ├─ _validate_context()  →  id_empresa=100 ✓
-  ├─ CitaConfig(**config)  →  personalidad="amable, profesional y eficiente"
+  ├─ config_data.setdefault("personalidad", "amable, profesional y eficiente")
   │
   ├─ _get_agent(config)
-  │   ├─ TTLCache miss → [asyncio.Lock cache_key=(100,"amable...")]
+  │   ├─ TTLCache miss → [asyncio.Lock cache_key=(100,)]
   │   │   ├─ init_chat_model("openai:gpt-4o-mini", temp=0.5, max_tokens=2048, timeout=60s)
   │   │   └─ build_citas_system_prompt(config)
   │   │       └─ asyncio.gather(

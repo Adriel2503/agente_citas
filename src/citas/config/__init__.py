@@ -28,8 +28,6 @@ from .config import (
     API_PREGUNTAS_FRECUENTES_URL,
     TIMEZONE,
 )
-from .models import CitaConfig
-
 __all__ = [
     "OPENAI_API_KEY",
     "OPENAI_MODEL",
@@ -55,5 +53,4 @@ __all__ = [
     "HTTP_RETRY_WAIT_MAX",
     "CB_THRESHOLD",
     "CB_RESET_TTL",
-    "CitaConfig",
 ]

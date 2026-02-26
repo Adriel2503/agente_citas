@@ -77,8 +77,8 @@ El agente **no** modifica ni cancela citas (operación no implementada). No gest
 │                   agent/agent.py — process_cita_message()           │
 │                                                                     │
 │  1. Session lock (asyncio.Lock por session_id)                      │
-│  2. Validate context → CitaConfig                                   │
-│  3. _get_agent(config) ← TTLCache(id_empresa, personalidad)         │
+│  2. Validate context → config_data (setdefault personalidad)        │
+│  3. _get_agent(config) ← TTLCache por id_empresa                   │
 │     └─ si miss: build_citas_system_prompt() [asyncio.gather x4]     │
 │  4. agent.ainvoke(messages, thread_id=session_id, context=ctx)      │
 └────────┬───────────────────────────────────────────┬────────────────┘
@@ -151,8 +151,8 @@ El `session_id` es el número de WhatsApp del prospecto (`5191234567890`), únic
 ```
 FastAPI → process_cita_message()
   ├─ Valida que context.config contenga id_empresa (requerido)
-  ├─ Construye CitaConfig (Pydantic) con los parámetros opcionales
-  └─ Construye AgentContext (dataclass) que se inyecta a las tools:
+  ├─ Aplica default de personalidad en config_data (setdefault) y construye AgentContext
+  └─ AgentContext (dataclass) se inyecta a las tools:
        id_empresa, usuario_id, correo_usuario, id_prospecto=session_id,
        duracion_cita_minutos, slots, agendar_usuario, agendar_sucursal
 ```
@@ -164,7 +164,7 @@ Antes de tocar el checkpointer (InMemorySaver), se adquiere un `asyncio.Lock` ke
 ### Paso 4 — Obtención del agente compilado (TTLCache)
 
 ```python
-cache_key = (id_empresa, personalidad)
+cache_key = (id_empresa,)
 agent = _agent_cache[cache_key]  # O lo crea si no existe
 ```
 
@@ -387,7 +387,7 @@ El agente usa **4 capas de caché** independientes, con TTLs distintos según la
 
 | Caché | Módulo | Clave | TTL | Propósito |
 |-------|--------|-------|-----|-----------|
-| `_agent_cache` | `agent.py` | `(id_empresa, personalidad)` | `AGENT_CACHE_TTL_MINUTES` (60 min) | Agente compilado (grafo LangGraph + system prompt) |
+| `_agent_cache` | `agent.py` | `id_empresa` | `AGENT_CACHE_TTL_MINUTES` (60 min) | Agente compilado (grafo LangGraph + system prompt) |
 | `_horario_cache` | `horario_cache.py` | `id_empresa` | `SCHEDULE_CACHE_TTL_MINUTES` (5 min) | Horario de reuniones por empresa |
 | `_contexto_cache` | `contexto_negocio.py` | `id_empresa` | 1 hora | Descripción y contexto de la empresa |
 | `_preguntas_cache` | `preguntas_frecuentes.py` | `id_chatbot` | 1 hora | FAQs del chatbot |
@@ -740,7 +740,6 @@ agent_citas/
 │   │
 │   ├── config/
 │   │   ├── config.py                  # Variables de entorno con validación de tipos
-│   │   ├── models.py                  # CitaConfig (Pydantic)
 │   │   └── __init__.py
 │   │
 │   └── prompts/

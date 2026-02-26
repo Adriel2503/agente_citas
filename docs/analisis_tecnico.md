@@ -52,7 +52,7 @@ src/citas/
 │   └── __init__.py                  # build_citas_system_prompt → Jinja2
 ├── config/
 │   ├── config.py                    # Variables de entorno con validación de tipos
-│   └── models.py                    # CitaConfig, ChatRequest, ChatResponse (sin usar en main.py)
+│   └── __init__.py                  # Re-export de config; default personalidad en agent.py
 ├── metrics.py                       # Prometheus: contadores, histogramas, gauges
 ├── validation.py                    # Pydantic: BookingData, CustomerName, ContactInfo
 └── logger.py                        # Setup de logging estructurado
@@ -66,7 +66,7 @@ src/citas/
 |---|---|---|
 | ✅ | `httpx.AsyncClient` compartido con connection pooling | `services/http_client.py` |
 | ✅ | `asyncio.gather` para los 4 fetches del system prompt en paralelo | `prompts/__init__.py:99` |
-| ✅ | TTLCache de agentes compilados por `(id_empresa, personalidad)` | `agent/agent.py:55` |
+| ✅ | TTLCache de agentes compilados por `id_empresa` | `agent/agent.py:55` |
 | ✅ | Double-check locking (asyncio.Lock) para thundering herd en agente y schedule | `agent.py:219`, `schedule_validator.py:186` |
 | ✅ | Circuit breaker + retry con backoff en `contexto_negocio` | `services/contexto_negocio.py` |
 | ✅ | Prometheus completo: contadores, histogramas por tool/API/LLM | `metrics.py` |

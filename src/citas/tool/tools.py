@@ -148,6 +148,10 @@ async def create_booking(
     usuario_id = getattr(ctx, "usuario_id", 1) if ctx else 1
     correo_usuario = getattr(ctx, "correo_usuario", "") or ""
 
+    is_valid, error = validate_date_format(date)
+    if not is_valid:
+        return error
+
     try:
         with track_tool_execution("create_booking"):
             # 1. VALIDAR datos de entrada
