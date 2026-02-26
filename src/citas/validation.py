@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 from pydantic import BaseModel, Field, field_validator
 
 try:
-    from .. import config as app_config
+    from .. import config as app_config  # pyright: ignore[reportMissingImports]
 except ImportError:
     from citas import config as app_config
 
