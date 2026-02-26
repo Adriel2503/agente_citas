@@ -40,13 +40,6 @@ _horario_cache: TTLCache = TTLCache(
 _fetch_locks: dict[Any, asyncio.Lock] = {}
 
 
-def clear_horario_cache() -> None:
-    """Limpia la cache de horarios (útil para testing)."""
-    _horario_cache.clear()
-    update_cache_stats("schedule", 0)
-    logger.debug("[HORARIO_CACHE] Cache limpiada")
-
-
 async def get_horario(id_empresa: Any | None) -> dict[str, Any] | None:
     """
     Obtiene el dict horario_reuniones desde la API con cache TTL.
@@ -121,4 +114,4 @@ async def get_horario(id_empresa: Any | None) -> dict[str, Any] | None:
             _fetch_locks.pop(id_empresa, None)
 
 
-__all__ = ["get_horario", "clear_horario_cache"]
+__all__ = ["get_horario"]

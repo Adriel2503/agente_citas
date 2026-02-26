@@ -14,13 +14,13 @@ try:
     from ..metrics import track_api_call
     from .. import config as app_config
     from .http_client import post_with_retry
-    from .horario_cache import get_horario, clear_horario_cache
+    from .horario_cache import get_horario
 except ImportError:
     from citas.logger import get_logger
     from citas.metrics import track_api_call
     from citas import config as app_config
     from citas.services.http_client import post_with_retry
-    from citas.services.horario_cache import get_horario, clear_horario_cache
+    from citas.services.horario_cache import get_horario
 
 logger = get_logger(__name__)
 
@@ -440,4 +440,4 @@ class ScheduleValidator:
         return {"text": "No pude obtener sugerencias ahora. Indica una fecha y hora que prefieras y la verifico."}
 
 
-__all__ = ["ScheduleValidator", "clear_horario_cache"]
+__all__ = ["ScheduleValidator"]
