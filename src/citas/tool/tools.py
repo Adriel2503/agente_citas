@@ -15,14 +15,14 @@ try:
     from ..services.busqueda_productos import buscar_productos_servicios, format_productos_para_respuesta
     from ..logger import get_logger
     from ..metrics import track_tool_execution
-    from ..validation import validate_booking_data
+    from ..validation import validate_booking_data, validate_date_format
 except ImportError:
     from citas.services.schedule_validator import ScheduleValidator
     from citas.services.booking import confirm_booking
     from citas.services.busqueda_productos import buscar_productos_servicios, format_productos_para_respuesta
     from citas.logger import get_logger
     from citas.metrics import track_tool_execution
-    from citas.validation import validate_booking_data
+    from citas.validation import validate_booking_data, validate_date_format
 
 logger = get_logger(__name__)
 
@@ -67,6 +67,10 @@ async def check_availability(
     agendar_usuario = ctx.agendar_usuario if ctx else 1
     agendar_sucursal = ctx.agendar_sucursal if ctx else 0
 
+    is_valid, error = validate_date_format(date)
+    if not is_valid:
+        return error
+
     try:
         with track_tool_execution("check_availability"):
             # Crear validator con configuración
@@ -94,7 +98,7 @@ async def check_availability(
 
     except Exception as e:
         logger.error("[TOOL] check_availability - Error: %s", e, exc_info=True)
-        return "Horarios típicos disponibles:\n• Mañana: 09:00, 10:00, 11:00\n• Tarde: 14:00, 15:00, 16:00"
+        return "No pude consultar disponibilidad ahora. Indica una fecha y hora y la verifico, o intenta en un momento."
 
 
 @tool

@@ -20,6 +20,8 @@ from .config import (
     HTTP_RETRY_ATTEMPTS,
     HTTP_RETRY_WAIT_MIN,
     HTTP_RETRY_WAIT_MAX,
+    CB_THRESHOLD,
+    CB_RESET_TTL,
     API_CALENDAR_URL,
     API_AGENDAR_REUNION_URL,
     API_INFORMACION_URL,
@@ -51,5 +53,7 @@ __all__ = [
     "HTTP_RETRY_ATTEMPTS",
     "HTTP_RETRY_WAIT_MIN",
     "HTTP_RETRY_WAIT_MAX",
+    "CB_THRESHOLD",
+    "CB_RESET_TTL",
     "CitaConfig",
 ]

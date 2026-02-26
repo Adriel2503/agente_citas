@@ -114,6 +114,22 @@ def _format_validation_error(e: ValidationError) -> str:
     return msg if isinstance(msg, str) else str(msg)[:500]
 
 
+def validate_date_format(date: str) -> tuple[bool, str | None]:
+    """
+    Comprueba que date sea YYYY-MM-DD (solo formato; no comprueba si está en el pasado).
+    Returns:
+        (True, None) si es válido; (False, mensaje) si no.
+    """
+    if not date or not date.strip():
+        return (False, "La fecha es obligatoria en formato YYYY-MM-DD (ej. 2026-01-27).")
+    s = date.strip()
+    try:
+        datetime.strptime(s, "%Y-%m-%d")
+        return (True, None)
+    except ValueError:
+        return (False, f"La fecha debe estar en formato YYYY-MM-DD (ej. 2026-01-27). Recibido: {s}.")
+
+
 def validate_booking_data(
     date: str,
     time: str,
@@ -144,4 +160,5 @@ def validate_booking_data(
 __all__ = [
     'BookingData',
     'validate_booking_data',
+    'validate_date_format',
 ]

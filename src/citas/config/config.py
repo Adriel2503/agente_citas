@@ -125,6 +125,12 @@ HTTP_RETRY_WAIT_MIN: int = _get_int("HTTP_RETRY_WAIT_MIN", 1, min_val=0, max_val
 HTTP_RETRY_WAIT_MAX: int = _get_int("HTTP_RETRY_WAIT_MAX", 4, min_val=1, max_val=60)
 
 # ---------------------------------------------------------------------------
+# Circuit breaker (threshold fallos → abierto; reset tras TTL segundos)
+# ---------------------------------------------------------------------------
+CB_THRESHOLD: int = _get_int("CB_THRESHOLD", 3, min_val=1, max_val=20)
+CB_RESET_TTL: int = _get_int("CB_RESET_TTL", 300, min_val=60, max_val=3600)
+
+# ---------------------------------------------------------------------------
 # Cache
 # ---------------------------------------------------------------------------
 

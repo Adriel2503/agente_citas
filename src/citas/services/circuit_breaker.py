@@ -1,9 +1,11 @@
 """
 Circuit breaker compartido para APIs de MaravIA.
 
-Dos singletons de módulo:
-- informacion_cb  → ws_informacion_ia.php      (keyed by id_empresa)
-- preguntas_cb    → ws_preguntas_frecuentes.php (keyed by id_chatbot)
+Cuatro singletons de módulo (threshold y reset_ttl desde config CB_*):
+- informacion_cb     → ws_informacion_ia.php      (keyed by id_empresa)
+- preguntas_cb      → ws_preguntas_frecuentes.php (keyed by id_chatbot)
+- calendario_cb     → ws_calendario.php           (key "global")
+- agendar_reunion_cb → ws_agendar_reunion.php     (keyed by id_empresa)
 
 Lógica: después de `threshold` TransportErrors consecutivos para la misma key,
 el circuit se abre y el servicio retorna fallback inmediatamente sin llamar a la API.
@@ -20,8 +22,10 @@ from cachetools import TTLCache
 
 try:
     from ..logger import get_logger
+    from .. import config as app_config
 except ImportError:
     from citas.logger import get_logger
+    from citas import config as app_config
 
 logger = get_logger(__name__)
 
@@ -92,16 +96,16 @@ class CircuitBreaker:
 # Compartido por: horario_cache, contexto_negocio, productos_servicios_citas, busqueda_productos
 informacion_cb: CircuitBreaker = CircuitBreaker(
     name="ws_informacion_ia",
-    threshold=3,
-    reset_ttl=300,  # 5 minutos
+    threshold=app_config.CB_THRESHOLD,
+    reset_ttl=app_config.CB_RESET_TTL,
 )
 
 # Keyed by id_chatbot.
 # Usado por: preguntas_frecuentes
 preguntas_cb: CircuitBreaker = CircuitBreaker(
     name="ws_preguntas_frecuentes",
-    threshold=3,
-    reset_ttl=300,
+    threshold=app_config.CB_THRESHOLD,
+    reset_ttl=app_config.CB_RESET_TTL,
 )
 
 # Key fija "global": ws_calendario.php es un servicio compartido de MaravIA.
@@ -110,8 +114,16 @@ preguntas_cb: CircuitBreaker = CircuitBreaker(
 # Usado por: booking
 calendario_cb: CircuitBreaker = CircuitBreaker(
     name="ws_calendario",
-    threshold=3,
-    reset_ttl=300,
+    threshold=app_config.CB_THRESHOLD,
+    reset_ttl=app_config.CB_RESET_TTL,
 )
 
-__all__ = ["CircuitBreaker", "informacion_cb", "preguntas_cb", "calendario_cb"]
+# Keyed by id_empresa. Lecturas: CONSULTAR_DISPONIBILIDAD, SUGERIR_HORARIOS.
+# Usado por: schedule_validator
+agendar_reunion_cb: CircuitBreaker = CircuitBreaker(
+    name="ws_agendar_reunion",
+    threshold=app_config.CB_THRESHOLD,
+    reset_ttl=app_config.CB_RESET_TTL,
+)
+
+__all__ = ["CircuitBreaker", "informacion_cb", "preguntas_cb", "calendario_cb", "agendar_reunion_cb"]

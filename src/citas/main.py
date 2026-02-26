@@ -23,14 +23,14 @@ try:
     from .logger import setup_logging, get_logger
     from .metrics import initialize_agent_info, HTTP_REQUESTS, HTTP_DURATION
     from .services.http_client import close_http_client
-    from .services.circuit_breaker import informacion_cb, preguntas_cb, calendario_cb
+    from .services.circuit_breaker import informacion_cb, preguntas_cb, calendario_cb, agendar_reunion_cb
 except ImportError:
     from citas import config as app_config
     from citas.agent import process_cita_message
     from citas.logger import setup_logging, get_logger
     from citas.metrics import initialize_agent_info, HTTP_REQUESTS, HTTP_DURATION
     from citas.services.http_client import close_http_client
-    from citas.services.circuit_breaker import informacion_cb, preguntas_cb, calendario_cb
+    from citas.services.circuit_breaker import informacion_cb, preguntas_cb, calendario_cb, agendar_reunion_cb
 
 # Configurar logging antes de cualquier otra cosa
 log_level = getattr(logging, app_config.LOG_LEVEL.upper(), logging.INFO)
@@ -186,6 +186,8 @@ async def health():
         issues.append("preguntas_api_degraded")
     if calendario_cb.any_open():
         issues.append("calendario_api_degraded")
+    if agendar_reunion_cb.any_open():
+        issues.append("agendar_reunion_api_degraded")
 
     status = "degraded" if issues else "ok"
     return JSONResponse(
