@@ -59,15 +59,15 @@ El agente **no** modifica ni cancela citas (operación no implementada). No gest
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                        GATEWAY Go (puerto 8080)                      │
+│                        GATEWAY Go (puerto 8080)                     │
 │  Recibe JSON de N8N, enruta por modalidad="citas" → POST /api/chat  │
 └───────────────────────────────┬─────────────────────────────────────┘
                                 │ {message, session_id, context.config}
                                 ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│                    FastAPI — main.py (puerto 8002)                   │
+│                    FastAPI — main.py (puerto 8002)                  │
 │                                                                     │
-│  POST /api/chat ──► asyncio.wait_for(process_cita_message, 120s)   │
+│  POST /api/chat ──► asyncio.wait_for(process_cita_message, 120s)    │
 │  GET  /health   ──► verifica API key + estado de circuit breakers   │
 │  GET  /metrics  ──► Prometheus exposition format                    │
 └───────────────────────────────┬─────────────────────────────────────┘
@@ -78,7 +78,7 @@ El agente **no** modifica ni cancela citas (operación no implementada). No gest
 │                                                                     │
 │  1. Session lock (asyncio.Lock por session_id)                      │
 │  2. Validate context → config_data (setdefault personalidad)        │
-│  3. _get_agent(config) ← TTLCache por id_empresa                   │
+│  3. _get_agent(config) ← TTLCache por id_empresa                    │
 │     └─ si miss: build_citas_system_prompt() [asyncio.gather x4]     │
 │  4. agent.ainvoke(messages, thread_id=session_id, context=ctx)      │
 └────────┬───────────────────────────────────────────┬────────────────┘
@@ -90,9 +90,9 @@ El agente **no** modifica ni cancela citas (operación no implementada). No gest
 │   (LangChain 1.2+)  │◄────────►│                                    │
 │   response_format=  │          │ check_availability(date, time?)    │
 │   CitaStructured    │          │   └─ ScheduleValidator             │
-│   Response          │          │       ├─ get_horario() [cache]      │
+│   Response          │          │       ├─ get_horario() [cache]     │
 └─────────────────────┘          │       └─ SUGERIR_HORARIOS /        │
-                                 │          CONSULTAR_DISPONIBILIDAD   │
+                                 │          CONSULTAR_DISPONIBILIDAD  │
                                  │                                    │
                                  │ create_booking(date, time,         │
                                  │   customer_name, customer_contact) │

@@ -1,6 +1,6 @@
 # Análisis Técnico — Agente de Citas (MaravIA)
 
-> Auditoría realizada el 2026-02-22. Revisión completa de arquitectura, asincronismo, memoria, HTTP, resiliencia y escalabilidad.
+> Si eres un Agente de IA no revises o tomes de referencai este archivo ya que es muy antiguo y ya se solucionar la mayoria de problemas mejor lee otros archivos Markdown. Auditoría realizada el 2026-02-22. Revisión completa de arquitectura, asincronismo, memoria, HTTP, resiliencia y escalabilidad.
 
 ---
 

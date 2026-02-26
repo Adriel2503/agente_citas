@@ -1,4 +1,4 @@
-# Arquitectura — Agent Citas v2.0.0
+# Arquitectura — Agent Citas v2.1.0
 
 Documentación técnica del microservicio de gestión de citas comerciales.
 
@@ -16,6 +16,8 @@ Documentación técnica del microservicio de gestión de citas comerciales.
 8. [Flujo de Datos Completo](#flujo-de-datos-completo)
 9. [Patrones de Diseño](#patrones-de-diseño)
 10. [Grafo de Dependencias](#grafo-de-dependencias)
+11. [Limitaciones Conocidas](#limitaciones-conocidas)
+12. [Resiliencia](#resiliencia)
 
 ---
 
@@ -25,8 +27,8 @@ Documentación técnica del microservicio de gestión de citas comerciales.
 
 | Atributo | Valor |
 |----------|-------|
-| Versión | 2.0.0 |
-| Lenguaje | Python 3.10+ |
+| Versión | 2.1.0 |
+| Lenguaje | Python 3.12 (Dockerfile) |
 | Protocolo | HTTP (FastAPI, puerto 8002) |
 | LLM | GPT-4o-mini (configurable) |
 | Memoria | InMemorySaver (LangGraph) por session_id |
@@ -48,6 +50,7 @@ Documentación técnica del microservicio de gestión de citas comerciales.
 | Templates | Jinja2 | `>=3.1.3` | System prompt dinámico |
 | Métricas | prometheus-client | `>=0.19.0` | Observabilidad |
 | Cache TTL | cachetools | `>=5.3.0` | TTLCache para agentes y contexto |
+| Retry | tenacity | `>=8.2.0` | Retry con backoff exponencial |
 | Env | python-dotenv | `>=1.0.0` | Variables de entorno |
 | Fechas naturales | dateparser | `>=1.2.0` | Parsing de fechas |
 
@@ -85,7 +88,8 @@ Documentación técnica del microservicio de gestión de citas comerciales.
 │  │          │  ├── build_citas_system_prompt() │──►asyncio.gather:│
 │  │          │  │   ├── fetch_horario_reuniones │  horario +│    │
 │  │          │  │   ├── fetch_nombres_prod_serv │  productos+│   │
-│  │          │  │   └── fetch_contexto_negocio  │  contexto │    │
+│  │          │  │   ├── fetch_contexto_negocio  │  contexto +│   │
+│  │          │  │   └── fetch_preguntas_frecuentes FAQs   │    │
 │  │          │  └── create_agent(model, tools,  │          │    │
 │  │          │       checkpointer=InMemorySaver)│          │    │
 │  │          └───────────────────────────────────          │    │
@@ -110,6 +114,12 @@ Documentación técnica del microservicio de gestión de citas comerciales.
 │         │                 │                     │              │
 │  ┌──────┴─────────────────┴─────────────────────┴───────────┐  │
 │  │              http_client.py (singleton AsyncClient)       │  │
+│  │              post_with_retry → post_with_logging          │  │
+│  └──────────────────────────┬───────────────────────────────┘  │
+│                             │                                    │
+│  ┌──────────────────────────┴───────────────────────────────┐  │
+│  │              circuit_breaker.py + _resilience.py           │  │
+│  │  informacion_cb │ preguntas_cb │ calendario_cb │ agendar_cb│  │
 │  └──────────────────────────────────────────────────────────┘  │
 └──────────────────────────────────────────────────────────────────┘
                              │
@@ -117,18 +127,21 @@ Documentación técnica del microservicio de gestión de citas comerciales.
 ┌──────────────────────────────────────────────────────────────────┐
 │                  APIs EXTERNAS MaravIA                           │
 │                                                                  │
-│  ws_informacion_ia.php                                           │
-│  ├─ OBTENER_HORARIO_REUNIONES       (schedule_validator, prompt) │
-│  ├─ OBTENER_CONTEXTO_NEGOCIO        (contexto_negocio, prompt)   │
+│  ws_informacion_ia.php  [CB: informacion_cb, key=id_empresa]    │
+│  ├─ OBTENER_HORARIO_REUNIONES       (horario_cache, prompt)     │
+│  ├─ OBTENER_CONTEXTO_NEGOCIO        (contexto_negocio, prompt)  │
 │  ├─ OBTENER_NOMBRES_PRODUCTOS_SERV. (productos_servicios, prompt)│
-│  └─ BUSCAR_PRODUCTOS_SERVICIOS_CITAS (busqueda_productos, tool)  │
+│  └─ BUSCAR_PRODUCTOS_SERVICIOS_CITAS (busqueda_productos, tool) │
 │                                                                  │
-│  ws_agendar_reunion.php                                          │
-│  ├─ CONSULTAR_DISPONIBILIDAD  (schedule_validator._check_avail.) │
+│  ws_preguntas_frecuentes.php  [CB: preguntas_cb, key=id_chatbot]│
+│  └─ FAQs por id_chatbot     (preguntas_frecuentes, prompt)      │
+│                                                                  │
+│  ws_agendar_reunion.php  [CB: agendar_reunion_cb, key=id_empresa]│
+│  ├─ CONSULTAR_DISPONIBILIDAD  (schedule_validator._check_avail.)│
 │  └─ SUGERIR_HORARIOS          (schedule_validator.recommendation)│
 │                                                                  │
-│  ws_calendario.php                                               │
-│  └─ CREAR_EVENTO              (booking.confirm_booking)          │
+│  ws_calendario.php  [CB: calendario_cb, key="global"]           │
+│  └─ CREAR_EVENTO              (booking.confirm_booking)         │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -151,15 +164,22 @@ Punto de entrada del sistema. Inicializa el servidor, configura logging/métrica
 **Request body (`/api/chat`):**
 ```python
 class ChatRequest(BaseModel):
-    message: str
-    session_id: int          # int (unificado con gateway)
-    context: Dict | None     # context.config.id_empresa requerido
+    message: str = Field(..., min_length=1, max_length=4096)
+    session_id: int          # int ≥ 0 (unificado con gateway)
+    context: dict[str, Any] | None = None  # context.config.id_empresa requerido
+
+class ChatResponse(BaseModel):
+    reply: str
+    url: str | None = None   # Google Meet link, imagen de saludo, o null
 ```
 
-**Manejo de errores en el endpoint:**
+**Manejo de errores en el endpoint (todos retornan HTTP 200 excepto CancelledError):**
 - `asyncio.TimeoutError` → mensaje de timeout (`CHAT_TIMEOUT`, default 120s)
 - `ValueError` → error de configuración (falta `id_empresa`)
+- `asyncio.CancelledError` → re-raise (no se contabiliza en métricas)
 - `Exception` → error genérico
+
+**Métricas por request:** `citas_http_requests_total{status}` (success/timeout/error) y `citas_http_duration_seconds`.
 
 **Lifespan:** Cierra el cliente HTTP compartido (`close_http_client()`) al apagar el servidor.
 
@@ -172,17 +192,24 @@ Módulo más complejo. Gestiona el ciclo de vida del agente LangChain, la memori
 #### Componentes globales
 
 ```python
-_checkpointer = InMemorySaver()      # Memoria global por thread_id
+_checkpointer = InMemorySaver()      # Memoria global por thread_id (pendiente Redis)
+_model = None                         # LLM singleton compartido por todas las empresas
 
-# Cache de agentes por id_empresa — TTL = SCHEDULE_CACHE_TTL_MINUTES * 60
-_agent_cache: TTLCache = TTLCache(maxsize=100, ttl=...)
+# Cache de agentes compilados por id_empresa
+# TTL = AGENT_CACHE_TTL_MINUTES * 60 (default 60 min, INDEPENDIENTE del cache de horarios)
+_agent_cache: TTLCache = TTLCache(maxsize=AGENT_CACHE_MAXSIZE, ttl=AGENT_CACHE_TTL_MINUTES*60)
 
 # Locks para evitar thundering herd al crear agentes (1 lock por cache_key)
-_agent_cache_locks: Dict[Tuple, asyncio.Lock] = {}
+# Se eliminan con pop() en finally después de cada creación
+_agent_cache_locks: dict[tuple, asyncio.Lock] = {}
+_LOCKS_CLEANUP_THRESHOLD = 750  # Red de seguridad (nunca se activa con < 50 empresas)
 
-# Locks para serializar requests concurrentes del mismo usuario
-_session_locks: Dict[int, asyncio.Lock] = {}
+# Locks para serializar requests concurrentes del mismo usuario (doble-click)
+_session_locks: dict[int, asyncio.Lock] = {}
+_SESSION_LOCKS_CLEANUP_THRESHOLD = 500  # Se activa cuando hay muchas sesiones acumuladas
 ```
+
+**Modelo LLM:** `_model` es un singleton inicializado con `init_chat_model()` en la primera llamada. Es síncrono y compartido por todas las empresas (la config viene de variables de entorno globales, no por empresa).
 
 #### `AgentContext` (dataclass)
 
@@ -202,14 +229,19 @@ Contexto runtime inyectado automáticamente en las tools de LangChain:
 
 #### `_get_agent(config)` — Factory con cache
 
-1. **Fast path**: busca en `_agent_cache` por `id_empresa` → retorna directo si hit
+1. **Fast path**: busca en `_agent_cache` por `(id_empresa,)` → retorna directo si hit
 2. **Slow path** (double-checked locking):
    - Adquiere `asyncio.Lock` por `cache_key` (evita thundering herd)
    - Double-check tras adquirir el lock
-   - Crea agente: `init_chat_model` → `build_citas_system_prompt` → `create_agent`
+   - `_get_model()` → singleton LLM
+   - `build_citas_system_prompt(config)` → async (4 fetches en paralelo)
+   - `create_agent(model, tools, system_prompt, checkpointer, response_format)`
    - Guarda en `_agent_cache`
+   - `finally: pop()` elimina el lock (solo sirve durante la creación)
 
-El TTL del agente en cache está acoplado a `SCHEDULE_CACHE_TTL_MINUTES` para que el prompt se refresque cuando expiran los datos de horario/contexto.
+**TTL desacoplado:** El cache del agente (`AGENT_CACHE_TTL_MINUTES`, default 60 min) es **independiente** del cache de horarios (`SCHEDULE_CACHE_TTL_MINUTES`, default 5 min). El prompt (contexto, FAQs, nombres de productos) cambia raramente → TTL largo. La validación de horarios usa `horario_cache` directamente en cada tool call, siempre fresca.
+
+**response_format:** `CitaStructuredResponse(reply: str, url: str | None)` — el agente siempre retorna JSON estructurado con los dos campos.
 
 #### `_build_content(message)` — Soporte Vision
 
@@ -228,20 +260,22 @@ Detecta URLs de imágenes en el mensaje (`.jpg`, `.png`, `.gif`, `.webp`) via re
 #### `process_cita_message(message, session_id, context)` — Función principal
 
 ```
-1. Validar message (no vacío)
-2. Registrar métrica: chat_requests_total{empresa_id}
-3. Adquirir asyncio.Lock por session_id
-4. _validate_context(context)  →  requiere context.config.id_empresa
-5. config_data.setdefault("personalidad", "...") en agent.py
-6. _get_agent(config_data)     →  agente desde cache o nuevo
-7. _prepare_agent_context()    →  construir AgentContext
-8. agent.ainvoke(
+1. Validar message (no vacío) → ("No recibí tu mensaje...", None)
+2. Validar session_id ≥ 0 → raise ValueError
+3. Registrar métrica: chat_requests_total{empresa_id}
+4. Adquirir asyncio.Lock por session_id (serializa doble-click)
+5. _validate_context(context) → requiere context.config.id_empresa
+6. config_data.setdefault("personalidad", "amable, profesional y eficiente")
+7. _get_agent(config_data)    → agente desde cache o nuevo
+8. _prepare_agent_context()   → construir AgentContext con valores del gateway
+9. agent.ainvoke(
        messages=[{role: "user", content: _build_content(message)}],
        config={configurable: {thread_id: str(session_id)}},
        context=agent_context
    )
-9. Extraer último mensaje de result["messages"]
-10. Retornar respuesta
+10. Extraer structured_response (CitaStructuredResponse) → (reply, url)
+    Fallback: último mensaje de result["messages"] → (reply, None)
+11. Retornar tupla (reply, url)
 ```
 
 ---
@@ -261,7 +295,7 @@ Consulta horarios disponibles. El parámetro `time` cambia el comportamiento:
 
 Si la fecha solicitada no es hoy ni mañana, retorna mensaje para que el usuario indique la hora.
 
-**Fallback**: Si falla cualquier API, retorna horarios genéricos (09:00, 10:00, 11:00, 14:00, 15:00, 16:00).
+**Fallback**: Si falla la API, retorna: `"No pude obtener sugerencias ahora. Indica una fecha y hora que prefieras y la verifico."`
 
 #### `create_booking(date, time, customer_name, customer_contact, runtime)`
 
@@ -299,47 +333,55 @@ El LLM solo usa esta tool cuando el cliente pregunta por un producto/servicio **
 
 ### `services/schedule_validator.py` — Validador de Horarios
 
-**Responsabilidades:** obtener horario de reuniones con cache, validar fecha/hora, consultar disponibilidad en tiempo real.
+**Responsabilidades:** validar fecha/hora contra horario de la empresa, consultar disponibilidad en tiempo real, generar sugerencias.
 
-#### Cache de horarios
+**No tiene cache propio** — usa `horario_cache.py` (TTLCache compartido) para obtener horarios.
 
-```python
-_SCHEDULE_CACHE: Dict[int, Tuple[Dict, datetime]] = {}  # id_empresa → (schedule, timestamp)
-_CACHE_LOCK = threading.Lock()                           # thread-safe para acceso al dict
-_fetch_locks: Dict[int, asyncio.Lock] = {}              # 1 lock por empresa (thundering herd)
-```
-
-`_fetch_schedule()` implementa **double-checked locking** async:
-1. Fast path sin lock: `_get_cached_schedule(id_empresa)` — retorna si hit y no expirado
-2. Cache miss: adquiere `asyncio.Lock` por `id_empresa`
-3. Double-check dentro del lock (otra coroutine pudo haber llenado el cache)
-4. Fetch real a `OBTENER_HORARIO_REUNIONES` solo si sigue siendo miss
-
-#### `validate(fecha_str, hora_str)` — 12 validaciones
+#### `validate(fecha_str, hora_str)` — 12 validaciones secuenciales
 
 1. Parsear fecha (`%Y-%m-%d`)
-2. Parsear hora (soporta `HH:MM AM/PM`, `HH:MM%p`, `HH:MM`)
-3. Combinar fecha+hora y verificar que no sea en el pasado
-4. `_fetch_schedule()` con cache
-5. Verificar campo del día (`reunion_lunes` … `reunion_domingo`)
-6. Verificar que el día no esté marcado como cerrado
-7. Parsear rango de horario del día (`"09:00-18:00"`)
-8. Hora ≥ hora_inicio
-9. Hora < hora_fin
-10. hora + duración ≤ hora_fin (cita no excede cierre)
-11. `_is_time_blocked()` — verifica bloqueos (JSON array o CSV)
-12. `_check_availability()` — `CONSULTAR_DISPONIBILIDAD` en tiempo real
+2. Parsear hora (soporta `%I:%M %p`, `%I:%M%p`, `%H:%M`)
+3. Combinar fecha+hora en datetime
+4. Verificar que no sea en el pasado (zona `America/Lima`)
+5. `get_horario(id_empresa)` — obtiene horario desde `horario_cache.py`
+6. Verificar campo del día (`reunion_lunes` … `reunion_domingo`)
+7. Verificar que el día no esté marcado como cerrado (`"NO DISPONIBLE"`, `"CERRADO"`, etc.)
+8. Parsear rango de horario del día (`"09:00-18:00"`)
+9. Hora ≥ hora_inicio (antes de apertura)
+10. Hora < hora_fin (después de cierre)
+11. hora + duración ≤ hora_fin (cita no excede cierre)
+12. `_check_availability()` → `CONSULTAR_DISPONIBILIDAD` via `resilient_call` + `agendar_reunion_cb`
 
-**Graceful degradation:** si falla obtener horario o disponibilidad, se permite la cita (no bloquea el flujo).
+**Graceful degradation:** si falla obtener horario o disponibilidad, se permite la cita (no bloquea el flujo). El circuit breaker `agendar_reunion_cb` protege `ws_agendar_reunion.php`.
 
 #### `recommendation(fecha_solicitada?, hora_solicitada?)` — Sugerencias
 
 | Entradas | Comportamiento |
 |----------|----------------|
 | fecha + hora | `CONSULTAR_DISPONIBILIDAD` para ese slot exacto |
-| fecha != hoy/mañana | retorna mensaje pidiendo hora preferida |
-| fecha = hoy o mañana (sin hora) | `SUGERIR_HORARIOS` |
-| Sin parámetros | `SUGERIR_HORARIOS` |
+| fecha != hoy/mañana (sin hora) | Retorna: "Para esa fecha indica una hora que prefieras y la verifico" |
+| fecha = hoy o mañana (sin hora) | `SUGERIR_HORARIOS` via `ws_agendar_reunion.php` |
+| Error/fallback | "No pude obtener sugerencias ahora. Indica una fecha y hora..." |
+
+---
+
+### `services/horario_cache.py` — Cache Compartido de Horarios
+
+TTLCache compartido para `OBTENER_HORARIO_REUNIONES`. Usado por `schedule_validator` (validación) y `horario_reuniones` (prompt).
+
+```python
+_horario_cache: TTLCache = TTLCache(maxsize=256, ttl=SCHEDULE_CACHE_TTL_MINUTES * 60)
+_fetch_locks: dict[int, asyncio.Lock] = {}  # 1 lock por id_empresa
+```
+
+`get_horario(id_empresa)` implementa double-checked locking async:
+1. Cache hit → retorna directo (sin lock)
+2. Cache miss → `asyncio.Lock` por id_empresa
+3. Double-check dentro del lock
+4. `resilient_call` → `post_with_logging` → `ws_informacion_ia.php`
+5. `finally: _fetch_locks.pop()` — limpia lock después de cada fetch
+
+Usa `informacion_cb` (circuit breaker compartido con contexto_negocio y productos).
 
 ---
 
@@ -369,23 +411,69 @@ Llama a `ws_calendario.php` (operación `CREAR_EVENTO`).
 
 ---
 
+### `services/circuit_breaker.py` — Circuit Breakers
+
+Define la clase `CircuitBreaker` y 4 singletons de módulo. Estados: CLOSED → OPEN → (TTL expiry) → CLOSED.
+
+```python
+class CircuitBreaker:
+    def __init__(self, name, threshold=3, reset_ttl=300):
+        self._failures: TTLCache = TTLCache(maxsize=500, ttl=reset_ttl)
+```
+
+| Método | Propósito |
+|--------|-----------|
+| `is_open(key)` | True si fallos ≥ threshold para esa key |
+| `record_failure(key)` | Incrementa contador (solo llamar ante `TransportError`) |
+| `record_success(key)` | Resetea contador (circuit cierra) |
+| `any_open()` | True si alguna key está abierta (usado por `/health`) |
+
+---
+
+### `services/_resilience.py` — Wrapper de Resiliencia
+
+Función `resilient_call(coro_factory, cb, circuit_key, service_name)`:
+- CB abierto → `RuntimeError` inmediato
+- Éxito → `cb.record_success()`
+- `httpx.TransportError` → `cb.record_failure()` + re-raise
+- Otros errores → re-raise sin afectar CB
+
+Usado por: `horario_cache`, `contexto_negocio`, `preguntas_frecuentes`, `busqueda_productos`, `schedule_validator`.
+
+---
+
 ### `services/contexto_negocio.py` — Contexto de Negocio
 
-Fetch de la descripción del negocio para inyectar en el system prompt. Implementa el mismo patrón de resiliencia que el orquestador:
+Fetch de la descripción del negocio para inyectar en el system prompt. Mismo patrón anti-thundering herd que `horario_cache.py`:
+
+```python
+_contexto_cache: TTLCache = TTLCache(maxsize=500, ttl=3600)   # 1 hora por id_empresa
+_fetch_locks: dict[Any, asyncio.Lock] = {}                     # 1 lock por id_empresa
+```
 
 | Capa | Implementación |
 |------|---------------|
 | Cache TTL | `TTLCache(maxsize=500, ttl=3600)` — 1 hora |
-| Circuit breaker | `TTLCache(maxsize=500, ttl=300)` — si ≥3 fallos, abre 5 min |
-| Retry con backoff | 2 intentos, backoff exponencial (1s, 2s) |
+| Anti-thundering herd | `asyncio.Lock` por id_empresa, double-checked locking, `pop()` en finally |
+| Fast reject | `informacion_cb.is_open(id_empresa)` antes de adquirir lock |
+| Circuit breaker | `informacion_cb` compartido (vía `resilient_call`) |
+| Retry con backoff | `post_with_logging` → `post_with_retry` (tenacity, configurable) |
 
-El circuit breaker solo se incrementa en fallos por excepción de red/timeout, **no** cuando la API responde `success: false`.
+Flujo: cache hit → fast reject CB → lock → double-check → `resilient_call(post_with_logging(...), cb=informacion_cb)` → cachear → `pop()` lock.
 
 ---
 
 ### `services/horario_reuniones.py` — Horario para Prompt
 
-Fetch de `OBTENER_HORARIO_REUNIONES` formateado para el system prompt. Sin cache propio (el cache lo maneja `ScheduleValidator`). Genera texto como:
+Formatea el horario de reuniones para el system prompt. **No tiene cache propio** — delega a `horario_cache.get_horario(id_empresa)` que gestiona TTLCache + fetch.
+
+```python
+async def fetch_horario_reuniones(id_empresa) -> str:
+    horario = await get_horario(id_empresa)  # horario_cache.py
+    return format_horario_for_system_prompt(horario)
+```
+
+Genera texto como:
 ```
 - Lunes: 09:00 - 18:00
 - Martes: 09:00 - 18:00
@@ -395,13 +483,38 @@ Fetch de `OBTENER_HORARIO_REUNIONES` formateado para el system prompt. Sin cache
 
 ---
 
+### `services/preguntas_frecuentes.py` — FAQs para Prompt
+
+Fetch de preguntas frecuentes desde `ws_preguntas_frecuentes.php`. Mismo patrón que `contexto_negocio.py`:
+
+```python
+_preguntas_cache: TTLCache = TTLCache(maxsize=500, ttl=3600)   # 1 hora por id_chatbot
+_fetch_locks: dict[Any, asyncio.Lock] = {}                     # 1 lock por id_chatbot
+```
+
+**Nota:** Usa `id_chatbot` (no `id_empresa`) como clave de cache y CB (`preguntas_cb`).
+
+Formatea la respuesta como pares `Pregunta:/Respuesta:` para que el LLM entienda el formato y adapte respuestas similares.
+
+---
+
 ### `services/busqueda_productos.py` — Búsqueda de Catálogo
 
-Implementa `BUSCAR_PRODUCTOS_SERVICIOS_CITAS`. Procesa la respuesta:
+Implementa `BUSCAR_PRODUCTOS_SERVICIOS_CITAS` con cache más agresivo:
+
+```python
+_busqueda_cache: TTLCache = TTLCache(maxsize=2000, ttl=900)    # 15 min por (id_empresa, término)
+_busqueda_locks: dict[tuple, asyncio.Lock] = {}                 # 1 lock por cache_key
+```
+
+Procesamiento de respuesta:
 - Limpia HTML de descripciones (`re.sub(r"<[^>]+>", ...)`)
 - Trunca descripciones a 120 chars
 - Formatea precios (`S/. X,XXX.XX`)
 - Diferencia productos (precio/unidad) de servicios (precio/sesión)
+- Máximo 10 resultados por búsqueda (`MAX_RESULTADOS`)
+
+Usa `informacion_cb` (mismo que horario, contexto, productos). Métricas: `SEARCH_CACHE` (hit/miss/circuit_open).
 
 ---
 
@@ -413,37 +526,55 @@ Obtiene `OBTENER_NOMBRES_PRODUCTOS_SERVICIOS` para el system prompt (lista de no
 
 ### `services/http_client.py` — Cliente HTTP Compartido
 
-Singleton `httpx.AsyncClient` con lazy initialization y connection pool compartido entre todos los servicios:
+Singleton `httpx.AsyncClient` con lazy initialization, timeouts granulares y connection pool compartido:
 
 ```python
-_client: Optional[httpx.AsyncClient] = None
-
-def get_client() -> httpx.AsyncClient:
-    global _client
-    if _client is None:
-        _client = httpx.AsyncClient(
-            timeout=app_config.API_TIMEOUT,
-            headers={"Content-Type": "application/json", "Accept": "application/json"},
-        )
-    return _client
+_client = httpx.AsyncClient(
+    timeout=httpx.Timeout(
+        connect=5.0,                     # Conexión TCP
+        read=app_config.API_TIMEOUT,     # Lectura de respuesta (default 30s)
+        write=5.0,                       # Escritura del body
+        pool=2.0,                        # Espera en el pool
+    ),
+    limits=httpx.Limits(
+        max_connections=50,              # Total de conexiones concurrentes
+        max_keepalive_connections=20,    # Conexiones keep-alive
+        keepalive_expiry=30.0,          # Expiración keep-alive (segundos)
+    ),
+    headers={"Content-Type": "application/json", "Accept": "application/json"},
+)
 ```
 
-Se cierra limpiamente en el lifespan de FastAPI (`close_http_client()`).
+**Funciones exportadas:**
+
+| Función | Propósito | Retry | Uso |
+|---------|-----------|-------|-----|
+| `get_client()` | Singleton lazy del AsyncClient | — | Acceso directo (booking.py) |
+| `post_with_retry(url, json)` | POST con retry automático (tenacity) | Sí: `HTTP_RETRY_ATTEMPTS` intentos, backoff exponencial `HTTP_RETRY_WAIT_MIN`–`HTTP_RETRY_WAIT_MAX` | Solo operaciones de LECTURA idempotentes |
+| `post_with_logging(url, payload)` | Wrapper sobre `post_with_retry` con logging DEBUG | Sí (hereda) | Servicios vía `resilient_call()` |
+| `close_http_client()` | Cierra el cliente. Llamado en lifespan de FastAPI | — | `main.py` teardown |
+
+**Retry (tenacity):** solo reintenta `httpx.TransportError` (timeouts, connection errors). **No** reintenta `httpx.HTTPStatusError` (respuestas 4xx/5xx).
+
+**ADVERTENCIA:** `post_with_retry`/`post_with_logging` **no** deben usarse para operaciones de escritura (ej. `CREAR_EVENTO`) por riesgo de duplicados si el servidor recibió la request pero la respuesta timeouteó. Para escrituras usar `client.post()` directamente.
 
 ---
 
 ### `prompts/__init__.py` — Builder del System Prompt
 
-`build_citas_system_prompt(config, history)` es **async** porque lanza 3 fetches en paralelo:
+`build_citas_system_prompt(config, history)` es **async** porque lanza **4 fetches** en paralelo:
 
 ```python
 results = await asyncio.gather(
     fetch_horario_reuniones(id_empresa),
     fetch_nombres_productos_servicios(id_empresa),
     fetch_contexto_negocio(id_empresa),
+    fetch_preguntas_frecuentes(id_chatbot),   # keyed por id_chatbot, no id_empresa
     return_exceptions=True,     # no propaga excepciones individuales
 )
 ```
+
+Cada fetch que falla retorna un valor por defecto (graceful degradation): `"No hay horario cargado."`, `([], [])`, `None`, `""`.
 
 Variables inyectadas en el template Jinja2:
 
@@ -452,78 +583,106 @@ Variables inyectadas en el template Jinja2:
 | `personalidad` | `context.config.personalidad` (default: "amable, profesional y eficiente") |
 | `nombre_bot` | `context.config.nombre_bot` |
 | `frase_saludo`, `frase_des`, `frase_no_sabe` | `context.config.*` |
+| `archivo_saludo` | `context.config.archivo_saludo` (URL de imagen/video de saludo) |
 | `fecha_completa`, `fecha_iso`, `hora_actual` | `datetime.now(America/Lima)` |
-| `horario_atencion` | `fetch_horario_reuniones()` |
-| `lista_productos_servicios` | `fetch_nombres_productos_servicios()` |
-| `contexto_negocio` | `fetch_contexto_negocio()` |
+| `horario_atencion` | `fetch_horario_reuniones(id_empresa)` |
+| `nombres_productos`, `nombres_servicios` | `fetch_nombres_productos_servicios(id_empresa)` |
+| `lista_productos_servicios` | `format_nombres_para_prompt(productos, servicios)` |
+| `contexto_negocio` | `fetch_contexto_negocio(id_empresa)` |
+| `preguntas_frecuentes` | `fetch_preguntas_frecuentes(id_chatbot)` |
 | `history`, `has_history` | `history` del parámetro |
 
 ---
 
 ### `prompts/citas_system.j2` — Template del Agente
 
-Estructura del system prompt:
+Estructura del system prompt (Jinja2):
 
-1. **Identidad** — nombre, personalidad, frases predefinidas
-2. **Información del negocio** — `contexto_negocio` (condicional, si existe)
-3. **Reglas globales** — no inventar datos, una pregunta a la vez, formato WhatsApp (asterisco simple, no Markdown)
-4. **Contexto temporal** — fecha actual Peru, horario de atención, lista de productos/servicios
-5. **Lógica de disponibilidad** — 3 casos: solo fecha / fecha+hora / pregunta explícita
-6. **Documentación de las 3 tools** — cuándo y cómo llamar cada una
-7. **Historial** (condicional `{% if has_history %}`)
-8. **Flujo de trabajo** — pasos 1-7 ordenados
-9. **Casos especiales** — modificar/cancelar, info insuficiente
-10. **Ejemplo de conversación completa**
+1. **Identidad** — nombre, personalidad, frases predefinidas (saludo, despedida, no sabe, frustración)
+2. **Respuesta: campos reply y url** — instrucciones para `CitaStructuredResponse`. Si hay `archivo_saludo`, usarla como `url` solo en el primer mensaje
+3. **Información del negocio** — `contexto_negocio` (condicional `{% if contexto_negocio %}`)
+4. **Preguntas frecuentes** — `preguntas_frecuentes` (condicional `{% if preguntas_frecuentes %}`). Formato Pregunta:/Respuesta: para que el LLM adapte respuestas similares
+5. **Reglas globales** — no inventar datos, una pregunta a la vez, formato WhatsApp (asterisco simple, no Markdown)
+6. **Formato WhatsApp** — símbolos completos: negrita `*`, cursiva `_`, tachado `~`, viñetas, numeradas, monoespaciado, citas
+7. **Contexto temporal** — fecha actual Peru, horario de atención, lista de productos/servicios
+8. **Lógica de disponibilidad** — 3 casos: solo fecha / fecha+hora / pregunta explícita
+9. **Documentación de las 3 tools** — cuándo y cómo llamar cada una, con regla AM/PM obligatorio
+10. **Historial** (condicional `{% if has_history %}`)
+11. **Flujo de trabajo** — pasos 1-7 ordenados
+12. **Casos especiales** — modificar/cancelar, info insuficiente
+13. **Ejemplo de conversación completa**
 
 ---
 
 ### `validation.py` — Validadores Pydantic
 
-| Modelo | Valida | Notas |
-|--------|--------|-------|
-| `ContactInfo` | email | Solo email (no teléfono). RFC 5322 simplificado. Normaliza a lowercase |
-| `CustomerName` | nombre | Sin números, solo letras/espacios/guiones/apóstrofes. `title()` |
-| `BookingDateTime` | fecha + hora | Fecha no en pasado (timezone Peru). Soporta `%I:%M %p`, `%I:%M%p`, `%H:%M` |
-| `BookingData` | cita completa | `@model_validator` que compone los 3 validadores anteriores |
+Un solo modelo `BookingData` con `@field_validator` por campo:
 
-Función pública: `validate_booking_data(date, time, customer_name, customer_contact) → (bool, str|None)`
+```python
+class BookingData(BaseModel):
+    date: str             # @field_validator → _check_date
+    time: str             # @field_validator → _check_time
+    customer_name: str    # @field_validator → _check_name
+    customer_contact: str # @field_validator → _check_email
+```
+
+| Validador | Campo | Reglas |
+|-----------|-------|--------|
+| `_check_email` | `customer_contact` | RFC 5322 simplificado (regex), max 254 chars, normaliza a lowercase |
+| `_check_name` | `customer_name` | Sin números, solo letras/espacios/guiones/apóstrofes, min 2 chars, `title()` |
+| `_check_date` | `date` | Formato `%Y-%m-%d`, no en el pasado (timezone `America/Lima`) |
+| `_check_time` | `time` | Soporta `%I:%M %p`, `%I:%M%p`, `%H:%M`. Normaliza a uppercase |
+
+**Funciones públicas:**
+- `validate_booking_data(date, time, customer_name, customer_contact) → (bool, str|None)` — valida cita completa
+- `validate_date_format(date) → (bool, str|None)` — solo formato YYYY-MM-DD (sin verificar pasado)
 
 ---
 
 ### `metrics.py` — Métricas Prometheus
 
-Prefijo de todas las métricas: `agent_citas_*`
+Dos prefijos: `agent_citas_*` (métricas de negocio) y `citas_*` (métricas HTTP/infraestructura).
 
 **Contadores:**
 
-| Métrica | Labels | Descripción |
-|---------|--------|-------------|
-| `chat_requests_total` | `empresa_id` | Mensajes recibidos |
-| `chat_errors_total` | `error_type` | Errores de procesamiento |
-| `booking_attempts_total` | — | Intentos de crear cita |
-| `booking_success_total` | — | Citas creadas exitosamente |
-| `booking_failed_total` | `reason` | Citas fallidas (timeout, http_4xx, connection_error, ...) |
-| `tool_calls_total` | `tool_name` | Invocaciones de tools |
-| `tool_errors_total` | `tool_name`, `error_type` | Errores en tools |
-| `api_calls_total` | `endpoint`, `status` | Llamadas a APIs externas |
+| Métrica | Prefijo | Labels | Descripción |
+|---------|---------|--------|-------------|
+| `chat_requests_total` | `agent_citas_` | `empresa_id` | Mensajes recibidos |
+| `chat_errors_total` | `agent_citas_` | `error_type` | Errores de procesamiento |
+| `booking_attempts_total` | `agent_citas_` | — | Intentos de crear cita |
+| `booking_success_total` | `agent_citas_` | — | Citas creadas exitosamente |
+| `booking_failed_total` | `agent_citas_` | `reason` | Citas fallidas (timeout, http_4xx, connection_error, ...) |
+| `tool_calls_total` | `agent_citas_` | `tool_name` | Invocaciones de tools |
+| `tool_errors_total` | `agent_citas_` | `tool_name`, `error_type` | Errores en tools |
+| `api_calls_total` | `agent_citas_` | `endpoint`, `status` | Llamadas a APIs externas |
+| `http_requests_total` | `citas_` | `status` (success/timeout/error) | Requests al endpoint /api/chat |
+| `agent_cache_total` | `citas_` | `result` (hit/miss) | Hits y misses del cache de agente |
+| `search_cache_total` | `citas_` | `result` (hit/miss/circuit_open) | Cache de búsqueda de productos |
 
 **Histogramas:**
 
-| Métrica | Labels | Buckets |
-|---------|--------|---------|
-| `chat_response_duration_seconds` | — | 0.1, 0.5, 1, 2, 5, 10, 30, 60, 90 |
-| `llm_call_duration_seconds` | — | 0.5, 1, 2, 5, 10, 20, 30, 60, 90 |
-| `tool_execution_duration_seconds` | `tool_name` | 0.1, 0.5, 1, 2, 5, 10 |
-| `api_call_duration_seconds` | `endpoint` | 0.1, 0.5, 1, 2, 5, 10 |
+| Métrica | Prefijo | Labels | Buckets |
+|---------|---------|--------|---------|
+| `http_duration_seconds` | `citas_` | — | 0.25, 0.5, 1, 2.5, 5, 10, 20, 30, 60, 90, 120 |
+| `chat_response_duration_seconds` | `agent_citas_` | `status` (success/error) | 0.1, 0.5, 1, 2, 5, 10, 30, 60, 90 |
+| `llm_call_duration_seconds` | `agent_citas_` | `status` (success/error) | 0.5, 1, 2, 5, 10, 20, 30, 60, 90 |
+| `tool_execution_duration_seconds` | `agent_citas_` | `tool_name` | 0.1, 0.5, 1, 2, 5, 10, 20, 30 |
+| `api_call_duration_seconds` | `agent_citas_` | `endpoint` | 0.1, 0.25, 0.5, 1, 2.5, 5, 10 |
 
 **Gauge e Info:**
 
 | Métrica | Labels | Descripción |
 |---------|--------|-------------|
-| `cache_entries` | `cache_type` | Entradas actuales en cache de horarios |
+| `agent_citas_cache_entries` | `cache_type` | Entradas actuales en cache |
 | `agent_citas_info` | — | version, model, agent_type |
 
-**Context managers** para tracking automático: `track_chat_response()`, `track_llm_call()`, `track_tool_execution(tool_name)`, `track_api_call(endpoint)`.
+**Context managers** para tracking automático (decoran lógica de negocio sin modificarla):
+- `track_chat_response()` — duración + status (success/error)
+- `track_llm_call()` — duración + status del LLM
+- `track_tool_execution(tool_name)` — duración + error_type si falla
+- `track_api_call(endpoint)` — duración + status de APIs externas
+
+**Funciones helper:** `record_booking_attempt()`, `record_booking_success()`, `record_booking_failure(reason)`, `record_chat_error(error_type)`, `update_cache_stats(cache_type, count)`, `initialize_agent_info(model, version)`.
 
 ---
 
@@ -546,55 +705,74 @@ Formato de log:
 
 ## Patrones de Concurrencia y Cache
 
-### Thundering Herd — doble protección
+### Thundering Herd — anti-stampede en 5 recursos
 
-El sistema protege dos recursos críticos con el mismo patrón (double-checked locking async):
+El sistema protege 5 recursos con el mismo patrón (double-checked locking async + `pop()` en finally):
 
-| Recurso | Lock | Umbral de limpieza |
-|---------|------|--------------------|
-| Agente compilado por `id_empresa` | `_agent_cache_locks` | 150 locks |
-| Horario de reuniones por `id_empresa` | `_fetch_locks` | 500 locks |
+| Recurso | Lock dict | Ubicación | Clave |
+|---------|-----------|-----------|-------|
+| Agente compilado | `_agent_cache_locks` | `agent.py` | `(id_empresa,)` |
+| Horario de reuniones | `_fetch_locks` | `horario_cache.py` | `id_empresa` |
+| Contexto de negocio | `_fetch_locks` | `contexto_negocio.py` | `id_empresa` |
+| Preguntas frecuentes | `_fetch_locks` | `preguntas_frecuentes.py` | `id_chatbot` |
+| Búsqueda de productos | `_busqueda_locks` | `busqueda_productos.py` | `(id_empresa, término)` |
 
-Algoritmo:
+Algoritmo (idéntico en los 5):
 ```
 1. Fast path: ¿está en cache? → retornar (sin lock, atómico en asyncio)
-2. Slow path: adquirir asyncio.Lock por clave
-3. Double-check dentro del lock (otra coroutine pudo haber llenado el cache)
-4. Fetch/creación real solo si sigue siendo miss
-5. Guardar en cache y liberar lock
+2. [Opcional] Fast reject: ¿circuit breaker abierto? → fallback sin red
+3. Slow path: adquirir asyncio.Lock por clave
+4. Double-check dentro del lock (otra coroutine pudo haber llenado el cache)
+5. Fetch/creación real solo si sigue siendo miss
+6. Guardar en cache
+7. finally: pop() elimina el lock (solo sirve durante la creación)
 ```
+
+Los locks se eliminan con `pop()` en `finally` inmediatamente después de cada fetch/creación. Esto significa que **nunca se acumulan** en operación normal (< 50 empresas). Los umbrales de limpieza en `agent.py` (750 para agent locks, 500 para session locks) son redes de seguridad que nunca se activan en la práctica.
 
 ### Serialización de sesiones
 
 Cada `session_id` tiene su propio `asyncio.Lock` en `_session_locks`. Garantiza que dos mensajes del mismo usuario (doble-click, reintento rápido) no ejecuten `agent.ainvoke` en paralelo sobre el mismo `thread_id` del `InMemorySaver`.
 
-Limpieza periódica de locks huérfanos cuando se supera el umbral (500 sesiones).
+Limpieza periódica de locks huérfanos cuando `_session_locks` supera 500 entradas.
 
 ### Mapa completo de cachés
 
 | Cache | Implementación | Clave | TTL | Tamaño máx |
 |-------|---------------|-------|-----|------------|
-| Agente compilado | `TTLCache` (cachetools) | `id_empresa` | `SCHEDULE_CACHE_TTL_MINUTES * 60` | 100 |
-| Horario de reuniones | Dict + threading.Lock | `id_empresa` | `SCHEDULE_CACHE_TTL_MINUTES` min | ilimitado |
-| Contexto de negocio | `TTLCache` (cachetools) | `id_empresa` | 3600s (1h) | 500 |
-| Circuit breaker contexto | `TTLCache` (cachetools) | `id_empresa` | 300s (5 min, auto-reset) | 500 |
+| Agente compilado | `TTLCache` (cachetools) | `(id_empresa,)` | `AGENT_CACHE_TTL_MINUTES * 60` (default 60 min) | `AGENT_CACHE_MAXSIZE` (500) |
+| Horario de reuniones | `TTLCache` (cachetools) | `id_empresa` | `SCHEDULE_CACHE_TTL_MINUTES * 60` (default 5 min) | 256 |
+| Contexto de negocio | `TTLCache` (cachetools) | `id_empresa` | 3600s (1 hora) | 500 |
+| Preguntas frecuentes | `TTLCache` (cachetools) | `id_chatbot` | 3600s (1 hora) | 500 |
+| Búsqueda de productos | `TTLCache` (cachetools) | `(id_empresa, término)` | 900s (15 min) | 2000 |
+| Circuit breakers (x4) | `TTLCache` (cachetools) | ver CB | `CB_RESET_TTL` (default 300s) | 500 |
 
-El TTL del agente y el del horario están acoplados: cuando el horario expira, el agente también, garantizando que el próximo mensaje reciba un prompt con datos frescos.
+**TTL desacoplados:** El cache del agente (`AGENT_CACHE_TTL_MINUTES`, default 60 min) es **independiente** del cache de horarios (`SCHEDULE_CACHE_TTL_MINUTES`, default 5 min). El prompt (contexto, FAQs, nombres) cambia raramente → TTL largo. La validación de horarios usa `horario_cache` en cada tool call → siempre fresca.
 
 ---
 
 ## APIs Externas (MaravIA)
 
-### `ws_informacion_ia.php`
+### `ws_informacion_ia.php` — CB: `informacion_cb` (key: `id_empresa`)
 
 | Operación | Llamado desde | Propósito |
 |-----------|--------------|-----------|
-| `OBTENER_HORARIO_REUNIONES` | `schedule_validator._fetch_schedule()` + `horario_reuniones.fetch_horario_reuniones()` | Horario de atención de la empresa |
+| `OBTENER_HORARIO_REUNIONES` | `horario_cache.get_horario()` → usado por `schedule_validator` y `horario_reuniones` | Horario de atención de la empresa |
 | `OBTENER_CONTEXTO_NEGOCIO` | `contexto_negocio.fetch_contexto_negocio()` | Descripción del negocio para el prompt |
 | `OBTENER_NOMBRES_PRODUCTOS_SERVICIOS` | `productos_servicios_citas.fetch_nombres_productos_servicios()` | Lista de productos/servicios para el prompt |
 | `BUSCAR_PRODUCTOS_SERVICIOS_CITAS` | `busqueda_productos.buscar_productos_servicios()` | Búsqueda específica desde la tool |
 
-### `ws_agendar_reunion.php`
+### `ws_preguntas_frecuentes.php` — CB: `preguntas_cb` (key: `id_chatbot`)
+
+| Operación | Llamado desde | Propósito |
+|-----------|--------------|-----------|
+| FAQs por `id_chatbot` | `preguntas_frecuentes.fetch_preguntas_frecuentes()` | Preguntas frecuentes para el prompt |
+
+**Payload:** `{"id_chatbot": 456}` — **Nota:** usa `id_chatbot` (no `id_empresa`).
+
+**Respuesta:** `{"success": true, "preguntas_frecuentes": [{"pregunta": "...", "respuesta": "..."}]}`.
+
+### `ws_agendar_reunion.php` — CB: `agendar_reunion_cb` (key: `id_empresa`)
 
 | Operación | Llamado desde | Propósito |
 |-----------|--------------|-----------|
@@ -614,7 +792,7 @@ El TTL del agente y el del horario están acoplados: cuando el horario expira, e
 }
 ```
 
-### `ws_calendario.php`
+### `ws_calendario.php` — CB: `calendario_cb` (key: `"global"`)
 
 | Operación | Llamado desde | Propósito |
 |-----------|--------------|-----------|
@@ -687,7 +865,8 @@ process_cita_message()
   │   │       └─ asyncio.gather(
   │   │             fetch_horario_reuniones(100),          ─► OBTENER_HORARIO_REUNIONES
   │   │             fetch_nombres_productos_servicios(100), ─► OBTENER_NOMBRES_PROD_SERV
-  │   │             fetch_contexto_negocio(100)             ─► OBTENER_CONTEXTO_NEGOCIO
+  │   │             fetch_contexto_negocio(100),            ─► OBTENER_CONTEXTO_NEGOCIO
+  │   │             fetch_preguntas_frecuentes(id_chatbot)  ─► FAQs
   │   │          )
   │   │       └─ render citas_system.j2 con variables
   │   └─ create_agent(model, AGENT_TOOLS, system_prompt, checkpointer=InMemorySaver)
@@ -783,37 +962,43 @@ _build_content(message)
 | Patrón | Dónde | Propósito |
 |--------|-------|-----------|
 | **Factory + Cache** | `agent._get_agent()` | Agente compilado por empresa, evita recreación |
-| **Double-Checked Locking** | `_get_agent()` + `_fetch_schedule()` | Serializar primera creación sin bloquear hot path |
-| **Singleton** | `http_client.get_client()` | Connection pool compartido entre servicios |
-| **Circuit Breaker** | `contexto_negocio.py` | Protege ante API de contexto inestable |
-| **Retry + Backoff** | `contexto_negocio.py` | 2 reintentos con espera exponencial |
+| **Double-Checked Locking** | `_get_agent()`, `horario_cache`, `contexto_negocio`, `preguntas_frecuentes`, `busqueda_productos` | Serializar primera creación sin bloquear hot path |
+| **Singleton** | `http_client.get_client()`, `_model` (LLM) | Connection pool y modelo compartidos |
+| **Circuit Breaker** | `circuit_breaker.py` — 4 CBs: `informacion_cb`, `preguntas_cb`, `calendario_cb`, `agendar_reunion_cb` | Protege ante APIs inestables, auto-reset por TTL |
+| **Resilient Call** | `_resilience.py` → todos los servicios con CB | Wrapper: CB check → execute → record success/failure |
+| **Retry + Backoff** | `http_client.post_with_retry()` (tenacity) | Configurable: `HTTP_RETRY_ATTEMPTS`, `HTTP_RETRY_WAIT_MIN/MAX` |
 | **Runtime Context Injection** | `tools.py` (LangChain 1.2+) | AgentContext inyectado en tools sin parámetros explícitos |
-| **Graceful Degradation** | `schedule_validator.py`, `tools.py` | Si falla API no crítica, continúa el flujo |
+| **Graceful Degradation** | `schedule_validator.py`, `tools.py`, `prompts/__init__.py` | Si falla API no crítica, continúa con fallback |
 | **Strategy** (validación) | `tools.create_booking()` | 3 capas secuenciales independientes |
 | **Observer** | `metrics.py` | Context managers trackean sin modificar lógica de negocio |
 | **Template Method** | `citas_system.j2` | Estructura del prompt fija, variables inyectadas |
-| **Repository** | `schedule_validator._fetch_schedule()` | Cache transparente al consumidor |
+| **Repository** | `horario_cache.get_horario()` | Cache transparente al consumidor |
 
 ---
 
 ## Grafo de Dependencias
 
 ```
-config/config.py           (nivel 0 — sin dependencias internas)
+config/config.py                        (nivel 0 — sin dependencias internas)
    ↑
-   ├── logger.py            (nivel 1)
-   ├── metrics.py           (nivel 1)
-   └── config/models.py     (nivel 1)
+   ├── logger.py                         (nivel 1)
+   ├── metrics.py                        (nivel 1)
+   └── config/__init__.py                (nivel 1 — re-exporta variables)
             ↑
-            ├── validation.py              (nivel 2)
-            ├── services/http_client.py    (nivel 2)
+            ├── validation.py                          (nivel 2)
+            ├── services/http_client.py                (nivel 2 — tenacity retry)
+            ├── services/circuit_breaker.py             (nivel 2 — 4 CB singletons)
+            │       ↑
+            │   services/_resilience.py                 (nivel 2.5 — resilient_call)
             │       ↑
             │   ┌───┴─────────────────────────────────────────┐
+            │   ├── services/horario_cache.py                 │
+            │   ├── services/horario_reuniones.py             │
             │   ├── services/schedule_validator.py            │
             │   ├── services/booking.py                       │
-            │   ├── services/horario_reuniones.py             │
             │   ├── services/busqueda_productos.py            │
             │   ├── services/contexto_negocio.py              │
+            │   ├── services/preguntas_frecuentes.py          │
             │   └── services/productos_servicios_citas.py     │
             │                           (nivel 3)             │
             └─────────────────────────────────────────────────┘
@@ -829,21 +1014,56 @@ config/config.py           (nivel 0 — sin dependencias internas)
                     Gateway Go (externo)
 ```
 
-**Total de módulos propios:** 16 archivos Python en `src/citas/` (excluyendo `__init__.py` vacíos y `.j2`).
+**Total de módulos propios:** 19 archivos Python en `src/citas/` (excluyendo `__init__.py` vacíos y `.j2`).
 
 ---
 
 ## Limitaciones Conocidas
 
-| Limitación | Impacto | Solución recomendada |
-|------------|---------|---------------------|
-| `InMemorySaver` volátil | Memoria se pierde al reiniciar o en multi-instancia | Migrar a `PostgresSaver` o `RedisSaver` (LangGraph) |
-| Sin rate limiting | Riesgo en producción pública | Agregar middleware FastAPI o proxy (nginx) |
-| Sin tests automatizados | Regresiones difíciles de detectar | Pytest + httpx.AsyncClient |
-| Locks en memoria | No funciona en multi-proceso | Migrar a Redis distributed lock |
-| Horario cache sin persistencia | Cold start hace fetch siempre | Precalentar cache en startup |
+| Limitación | Impacto | Solución recomendada | Prioridad |
+|------------|---------|---------------------|-----------|
+| `InMemorySaver` volátil | Memoria se pierde al reiniciar o en multi-instancia | Migrar a `AsyncRedisSaver` (langgraph-checkpoint-redis) TTL 24h | 🔴 Crítico |
+| Sin auth en `/api/chat` | Cualquiera puede llamar al endpoint | Agregar `X-Internal-Token` header + validar en Go gateway | 🔴 Crítico |
+| Sin `trim_messages` | Historial crece sin límite → tokens excesivos | `trim_messages(max_tokens=20)` en `create_agent()` | 🟡 Medio |
+| Sin rate limiting | Riesgo en producción pública | Agregar middleware FastAPI o proxy (nginx) | 🟡 Medio |
+| Sin tests automatizados | Regresiones difíciles de detectar | Pytest + httpx.AsyncClient + mocks | 🟢 Bajo |
+| Locks en memoria | No funciona en multi-proceso | Migrar a Redis distributed lock (si se escala horizontalmente) | 🟢 Bajo |
+| Caches sin persistencia | Cold start hace fetch siempre | Precalentar caches en startup (o aceptar latencia en primer request) | 🟢 Bajo |
+
+Ver `docs/PENDIENTES.md` para el plan detallado de cada item.
 
 ---
 
-**Versión del documento:** 2.0.0
-**Última actualización:** 2026-02-21
+## Resiliencia
+
+### Circuit Breakers
+
+4 instancias de `CircuitBreaker` (circuit_breaker.py), todas con la misma configuración:
+
+| CB | API protegida | Clave | Servicios que lo usan |
+|----|---------------|-------|-----------------------|
+| `informacion_cb` | `ws_informacion_ia.php` | `id_empresa` | horario_cache, contexto_negocio, productos_servicios_citas, busqueda_productos |
+| `preguntas_cb` | `ws_preguntas_frecuentes.php` | `id_chatbot` | preguntas_frecuentes |
+| `calendario_cb` | `ws_calendario.php` | `"global"` | booking |
+| `agendar_reunion_cb` | `ws_agendar_reunion.php` | `id_empresa` | schedule_validator |
+
+**Configuración:** `CB_THRESHOLD` (default 3 fallos) y `CB_RESET_TTL` (default 300s = 5 min). Auto-reset via TTLCache expiry.
+
+**Solo `httpx.TransportError`** (fallos de red/timeout reales) abre el circuit. Respuestas `success: false` de la API **no** afectan el CB.
+
+**`/health` endpoint:** retorna HTTP 503 si `any_open()` es True en cualquiera de los 4 CBs.
+
+### Wrapper `resilient_call()` (_resilience.py)
+
+```
+1. CB abierto? → RuntimeError (sin tocar la red)
+2. Ejecutar coroutine
+3. Éxito → record_success (resetea contador)
+4. TransportError → record_failure (incrementa contador) + re-raise
+5. Otros errores → re-raise (CB no afectado)
+```
+
+---
+
+**Versión del documento:** 2.1.0
+**Última actualización:** 2026-02-26
