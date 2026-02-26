@@ -81,7 +81,6 @@ async def build_citas_system_prompt(
     # Fecha y hora actual en Perú (para que el agente sepa "hoy" y "mañana")
     now = _now_peru()
     variables["fecha_iso"] = variables.get("fecha_iso") or now.strftime("%Y-%m-%d")
-    variables["fecha_formateada"] = variables.get("fecha_formateada") or now.strftime("%d/%m/%Y")
     variables["hora_actual"] = now.strftime("%I:%M %p")
     dia_nombre = _DIAS_ESPANOL[now.weekday()]
     mes_nombre = _MESES_ESPANOL[now.month - 1]

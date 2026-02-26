@@ -7,13 +7,6 @@ import logging
 import sys
 from pathlib import Path
 
-# Niveles de log
-DEBUG = logging.DEBUG
-INFO = logging.INFO
-WARNING = logging.WARNING
-ERROR = logging.ERROR
-CRITICAL = logging.CRITICAL
-
 
 def setup_logging(
     level: int = logging.INFO,
@@ -74,4 +67,4 @@ def get_logger(name: str) -> logging.Logger:
 # Logger por defecto para uso rápido
 logger = get_logger("citas")
 
-__all__ = ["setup_logging", "get_logger", "logger", "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+__all__ = ["setup_logging", "get_logger", "logger"]

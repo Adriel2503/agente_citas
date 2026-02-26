@@ -7,7 +7,7 @@ import re
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 try:
     from .. import config as app_config  # pyright: ignore[reportMissingImports]
@@ -103,6 +103,17 @@ class BookingData(BaseModel):
         return _check_time(v)
 
 
+def _format_validation_error(e: ValidationError) -> str:
+    """Convierte ValidationError de Pydantic en un mensaje legible para el usuario."""
+    errors = e.errors()
+    if not errors:
+        return str(e)[:500] if len(str(e)) > 500 else str(e)
+    msg = errors[0].get("msg", str(e))
+    if isinstance(msg, str) and msg.lower().startswith("value error, "):
+        return msg[13:].strip()
+    return msg if isinstance(msg, str) else str(msg)[:500]
+
+
 def validate_booking_data(
     date: str,
     time: str,
@@ -124,6 +135,8 @@ def validate_booking_data(
             customer_contact=customer_contact
         )
         return (True, None)
+    except ValidationError as e:
+        return (False, _format_validation_error(e))
     except ValueError as e:
         return (False, str(e))
 
