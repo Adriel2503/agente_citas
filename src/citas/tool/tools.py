@@ -42,6 +42,7 @@ async def check_availability(
     Si el cliente indicó una hora concreta (ej. "a las 2pm", "a las 14:00"), pásala en time
     para consultar disponibilidad exacta de ese slot (CONSULTAR_DISPONIBILIDAD).
     Si no pasas time, se devuelven sugerencias para hoy/mañana (SUGERIR_HORARIOS).
+    Sin time, las sugerencias solo están disponibles para hoy y mañana; para otras fechas el cliente debe indicar también la hora.
 
     Args:
         date: Fecha en formato ISO (YYYY-MM-DD)
@@ -115,6 +116,8 @@ async def create_booking(
     Usa esta herramienta SOLO cuando tengas TODOS los datos necesarios:
     - Fecha (YYYY-MM-DD), Hora (HH:MM AM/PM)
     - Nombre completo del cliente, Email del cliente (customer_contact)
+
+    Solo invocar después de confirmar con el cliente fecha, hora, nombre y correo.
 
     La herramienta validará el horario y creará el evento en ws_calendario (CREAR_EVENTO).
     La respuesta puede incluir enlace de videollamada (Google Meet) o mensaje de cita confirmada.
