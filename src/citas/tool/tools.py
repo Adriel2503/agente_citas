@@ -6,7 +6,7 @@ NO están expuestas directamente al orquestador.
 Versión mejorada con logging, métricas, validación y runtime context (LangChain 1.2+).
 """
 
-from typing import Any, Dict, Optional
+from typing import Any
 from langchain.tools import tool, ToolRuntime
 
 try:
@@ -15,14 +15,14 @@ try:
     from ..services.busqueda_productos import buscar_productos_servicios, format_productos_para_respuesta
     from ..logger import get_logger
     from ..metrics import track_tool_execution
-    from ..validation import validate_booking_data
+    from ..validation import validate_booking_data, validate_date_format
 except ImportError:
     from citas.services.schedule_validator import ScheduleValidator
     from citas.services.booking import confirm_booking
     from citas.services.busqueda_productos import buscar_productos_servicios, format_productos_para_respuesta
     from citas.logger import get_logger
     from citas.metrics import track_tool_execution
-    from citas.validation import validate_booking_data
+    from citas.validation import validate_booking_data, validate_date_format
 
 logger = get_logger(__name__)
 
@@ -30,7 +30,7 @@ logger = get_logger(__name__)
 @tool
 async def check_availability(
     date: str,
-    time: Optional[str] = None,
+    time: str | None = None,
     runtime: ToolRuntime = None
 ) -> str:
     """
@@ -42,6 +42,7 @@ async def check_availability(
     Si el cliente indicó una hora concreta (ej. "a las 2pm", "a las 14:00"), pásala en time
     para consultar disponibilidad exacta de ese slot (CONSULTAR_DISPONIBILIDAD).
     Si no pasas time, se devuelven sugerencias para hoy/mañana (SUGERIR_HORARIOS).
+    Sin time, las sugerencias solo están disponibles para hoy y mañana; para otras fechas el cliente debe indicar también la hora.
 
     Args:
         date: Fecha en formato ISO (YYYY-MM-DD)
@@ -66,6 +67,10 @@ async def check_availability(
     slots = ctx.slots if ctx else 60
     agendar_usuario = ctx.agendar_usuario if ctx else 1
     agendar_sucursal = ctx.agendar_sucursal if ctx else 0
+
+    is_valid, error = validate_date_format(date)
+    if not is_valid:
+        return error
 
     try:
         with track_tool_execution("check_availability"):
@@ -94,7 +99,7 @@ async def check_availability(
 
     except Exception as e:
         logger.error("[TOOL] check_availability - Error: %s", e, exc_info=True)
-        return "Horarios típicos disponibles:\n• Mañana: 09:00, 10:00, 11:00\n• Tarde: 14:00, 15:00, 16:00"
+        return "No pude consultar disponibilidad ahora. Indica una fecha y hora y la verifico, o intenta en un momento."
 
 
 @tool
@@ -111,6 +116,8 @@ async def create_booking(
     Usa esta herramienta SOLO cuando tengas TODOS los datos necesarios:
     - Fecha (YYYY-MM-DD), Hora (HH:MM AM/PM)
     - Nombre completo del cliente, Email del cliente (customer_contact)
+
+    Solo invocar después de confirmar con el cliente fecha, hora, nombre y correo.
 
     La herramienta validará el horario y creará el evento en ws_calendario (CREAR_EVENTO).
     La respuesta puede incluir enlace de videollamada (Google Meet) o mensaje de cita confirmada.
@@ -143,6 +150,10 @@ async def create_booking(
     id_prospecto = ctx.id_prospecto if ctx else 0
     usuario_id = getattr(ctx, "usuario_id", 1) if ctx else 1
     correo_usuario = getattr(ctx, "correo_usuario", "") or ""
+
+    is_valid, error = validate_date_format(date)
+    if not is_valid:
+        return error
 
     try:
         with track_tool_execution("create_booking"):
@@ -202,7 +213,7 @@ async def create_booking(
                 lines = [
                     api_message,
                     "",
-                    "**Detalles:**",
+                    "Detalles:",
                     f"• Fecha: {date}",
                     f"• Hora: {time}",
                     f"• Nombre: {customer_name}",
@@ -228,44 +239,47 @@ async def create_booking(
 @tool
 async def search_productos_servicios(
     busqueda: str,
-    limite: int = 10,
     runtime: ToolRuntime = None
 ) -> str:
     """
     Busca productos y servicios del catálogo por nombre o descripción.
     Úsala cuando el cliente pregunte por algo específico: precios, descripción,
-    detalles de un producto o servicio concreto.
+    detalles de un producto o servicio concreto. Devuelve hasta 10 resultados.
 
     Args:
         busqueda: Término de búsqueda (ej: "NovaX", "demostración", "consultoría")
-        limite: Cantidad máxima de resultados (opcional, default 10)
         runtime: Contexto automático (inyectado por LangChain)
 
     Returns:
         Texto con los productos/servicios encontrados (precio, categoría, descripción)
     """
-    logger.debug("[TOOL] search_productos_servicios - busqueda: %s, limite: %s", busqueda, limite)
     logger.info("[search_productos_servicios] Tool en uso: search_productos_servicios")
 
     ctx = runtime.context if runtime else None
     id_empresa = ctx.id_empresa if ctx else 1
 
+    logger.debug(
+        "[TOOL] search_productos_servicios - id_empresa=%s, busqueda=%s",
+        id_empresa, busqueda,
+    )
     try:
         with track_tool_execution("search_productos_servicios"):
             result = await buscar_productos_servicios(
                 id_empresa=id_empresa,
                 busqueda=busqueda,
-                limite=limite,
                 log_search_apis=True,
             )
 
             if not result["success"]:
+                logger.debug("[TOOL] search_productos_servicios - Respuesta: error=%s", result.get("error"))
                 return result.get("error", "No se pudo completar la búsqueda.")
 
             productos = result.get("productos", [])
             if not productos:
+                logger.debug("[TOOL] search_productos_servicios - Respuesta: 0 resultados")
                 return f"No encontré productos o servicios que coincidan con '{busqueda}'. Prueba con otros términos."
 
+            logger.debug("[TOOL] search_productos_servicios - Respuesta: %s resultado(s)", len(productos))
             lineas = [f"Encontré {len(productos)} resultado(s) para '{busqueda}':\n"]
 
             lineas.append(format_productos_para_respuesta(productos))

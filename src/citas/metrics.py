@@ -6,7 +6,6 @@ Usa Prometheus para tracking de performance y uso.
 from prometheus_client import Counter, Histogram, Gauge, Info
 import time
 from contextlib import contextmanager
-from typing import Optional
 
 # ========== CONTADORES ==========
 
@@ -60,11 +59,39 @@ api_calls_total = Counter(
     ['endpoint', 'status']
 )
 
+# HTTP layer (/api/chat)
+HTTP_REQUESTS = Counter(
+    'citas_http_requests_total',
+    'Total de requests al endpoint /api/chat por resultado',
+    ['status'],  # success | timeout | error
+)
+
+# Cache del agente (por empresa)
+AGENT_CACHE = Counter(
+    'citas_agent_cache_total',
+    'Hits y misses del cache de agente por empresa',
+    ['result'],  # hit | miss
+)
+
+# Cache de búsqueda de productos
+SEARCH_CACHE = Counter(
+    'citas_search_cache_total',
+    'Resultados del cache de búsqueda de productos',
+    ['result'],  # hit | miss | circuit_open
+)
+
 # ========== HISTOGRAMAS (LATENCIA) ==========
+
+HTTP_DURATION = Histogram(
+    'citas_http_duration_seconds',
+    'Latencia total del endpoint /api/chat (incluye LLM y tools)',
+    buckets=[0.25, 0.5, 1, 2.5, 5, 10, 20, 30, 60, 90, 120],
+)
 
 chat_response_duration_seconds = Histogram(
     'agent_citas_chat_response_duration_seconds',
     'Tiempo de respuesta del chat en segundos',
+    ['status'],
     buckets=(0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 90.0)
 )
 
@@ -72,19 +99,20 @@ tool_execution_duration_seconds = Histogram(
     'agent_citas_tool_execution_duration_seconds',
     'Tiempo de ejecución de tools en segundos',
     ['tool_name'],
-    buckets=(0.1, 0.5, 1.0, 2.0, 5.0, 10.0)
+    buckets=(0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 30.0)
 )
 
 api_call_duration_seconds = Histogram(
     'agent_citas_api_call_duration_seconds',
     'Tiempo de llamadas a API en segundos',
     ['endpoint'],
-    buckets=(0.1, 0.5, 1.0, 2.0, 5.0, 10.0)
+    buckets=(0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0)
 )
 
 llm_call_duration_seconds = Histogram(
     'agent_citas_llm_call_duration_seconds',
     'Tiempo de llamadas al LLM en segundos',
+    ['status'],
     buckets=(0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 30.0, 60.0, 90.0)
 )
 
@@ -108,20 +136,21 @@ agent_info = Info(
 @contextmanager
 def track_chat_response():
     """Context manager para trackear duración de respuestas del chat."""
-    start_time = time.time()
+    start_time = time.perf_counter()
+    status = "success"
     try:
         yield
-    except BaseException:
+    except Exception:
+        status = "error"
         raise
-    else:
-        duration = time.time() - start_time
-        chat_response_duration_seconds.observe(duration)
+    finally:
+        chat_response_duration_seconds.labels(status=status).observe(time.perf_counter() - start_time)
 
 
 @contextmanager
 def track_tool_execution(tool_name: str):
     """Context manager para trackear duración de ejecución de tools."""
-    start_time = time.time()
+    start_time = time.perf_counter()
     tool_calls_total.labels(tool_name=tool_name).inc()
     try:
         yield
@@ -132,14 +161,14 @@ def track_tool_execution(tool_name: str):
         ).inc()
         raise
     else:
-        duration = time.time() - start_time
+        duration = time.perf_counter() - start_time
         tool_execution_duration_seconds.labels(tool_name=tool_name).observe(duration)
 
 
 @contextmanager
 def track_api_call(endpoint: str):
     """Context manager para trackear duración de llamadas a API."""
-    start_time = time.time()
+    start_time = time.perf_counter()
     status = "unknown"
     try:
         yield
@@ -148,7 +177,7 @@ def track_api_call(endpoint: str):
         status = f"error_{type(e).__name__}"
         raise
     else:
-        duration = time.time() - start_time
+        duration = time.perf_counter() - start_time
         api_call_duration_seconds.labels(endpoint=endpoint).observe(duration)
     finally:
         api_calls_total.labels(endpoint=endpoint, status=status).inc()
@@ -157,14 +186,15 @@ def track_api_call(endpoint: str):
 @contextmanager
 def track_llm_call():
     """Context manager para trackear duración de llamadas al LLM."""
-    start_time = time.time()
+    start_time = time.perf_counter()
+    status = "success"
     try:
         yield
-    except BaseException:
+    except Exception:
+        status = "error"
         raise
-    else:
-        duration = time.time() - start_time
-        llm_call_duration_seconds.observe(duration)
+    finally:
+        llm_call_duration_seconds.labels(status=status).observe(time.perf_counter() - start_time)
 
 
 # ========== FUNCIONES DE UTILIDAD ==========
@@ -220,4 +250,8 @@ __all__ = [
     'chat_requests_total',
     'booking_success_total',
     'booking_failed_total',
+    'HTTP_REQUESTS',
+    'HTTP_DURATION',
+    'AGENT_CACHE',
+    'SEARCH_CACHE',
 ]

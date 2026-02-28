@@ -5,7 +5,6 @@ Incluye validación de tipos/valores y anotaciones para IDE y documentación.
 
 import os
 from pathlib import Path
-from typing import Optional
 
 from dotenv import load_dotenv
 
@@ -40,8 +39,8 @@ def _get_str(key: str, default: str) -> str:
 def _get_int(
     key: str,
     default: int,
-    min_val: Optional[int] = None,
-    max_val: Optional[int] = None,
+    min_val: int | None = None,
+    max_val: int | None = None,
 ) -> int:
     """Obtiene variable de entorno como int; valida y usa default si es inválida."""
     raw = os.getenv(key, str(default))
@@ -59,8 +58,8 @@ def _get_int(
 def _get_float(
     key: str,
     default: float,
-    min_val: Optional[float] = None,
-    max_val: Optional[float] = None,
+    min_val: float | None = None,
+    max_val: float | None = None,
 ) -> float:
     """Obtiene variable de entorno como float; valida y usa default si es inválida."""
     raw = os.getenv(key, str(default))
@@ -120,6 +119,17 @@ API_TIMEOUT: int = _get_int("API_TIMEOUT", 10, min_val=1, max_val=120)
 CHAT_TIMEOUT: int = _get_int("CHAT_TIMEOUT", 120, min_val=30, max_val=300)
 MAX_TOKENS: int = _get_int("MAX_TOKENS", 2048, min_val=1, max_val=128000)
 
+# Retry HTTP (aplica a todos los servicios de lectura vía post_with_retry)
+HTTP_RETRY_ATTEMPTS: int = _get_int("HTTP_RETRY_ATTEMPTS", 3, min_val=1, max_val=10)
+HTTP_RETRY_WAIT_MIN: int = _get_int("HTTP_RETRY_WAIT_MIN", 1, min_val=0, max_val=30)
+HTTP_RETRY_WAIT_MAX: int = _get_int("HTTP_RETRY_WAIT_MAX", 4, min_val=1, max_val=60)
+
+# ---------------------------------------------------------------------------
+# Circuit breaker (threshold fallos → abierto; reset tras TTL segundos)
+# ---------------------------------------------------------------------------
+CB_THRESHOLD: int = _get_int("CB_THRESHOLD", 3, min_val=1, max_val=20)
+CB_RESET_TTL: int = _get_int("CB_RESET_TTL", 300, min_val=60, max_val=3600)
+
 # ---------------------------------------------------------------------------
 # Cache
 # ---------------------------------------------------------------------------
@@ -127,6 +137,10 @@ MAX_TOKENS: int = _get_int("MAX_TOKENS", 2048, min_val=1, max_val=128000)
 SCHEDULE_CACHE_TTL_MINUTES: int = _get_int(
     "SCHEDULE_CACHE_TTL_MINUTES", 5, min_val=1, max_val=1440
 )
+AGENT_CACHE_TTL_MINUTES: int = _get_int(
+    "AGENT_CACHE_TTL_MINUTES", 60, min_val=5, max_val=1440
+)
+AGENT_CACHE_MAXSIZE: int = _get_int("AGENT_CACHE_MAXSIZE", 500, min_val=10, max_val=5000)
 
 # ---------------------------------------------------------------------------
 # APIs MaravIA (calendario, agendar reunión, información/horarios)
@@ -143,6 +157,10 @@ API_AGENDAR_REUNION_URL: str = _get_str(
 API_INFORMACION_URL: str = _get_str(
     "API_INFORMACION_URL",
     "https://api.maravia.pe/servicio/ws_informacion_ia.php",
+)
+API_PREGUNTAS_FRECUENTES_URL: str = _get_str(
+    "API_PREGUNTAS_FRECUENTES_URL",
+    "https://api.maravia.pe/servicio/n8n/ws_preguntas_frecuentes.php",
 )
 
 # ---------------------------------------------------------------------------

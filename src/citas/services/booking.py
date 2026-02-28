@@ -9,18 +9,20 @@ import re
 from datetime import datetime, timedelta
 
 import httpx
-from typing import Any, Dict
+from typing import Any
 
 try:
     from ..logger import get_logger
     from ..metrics import track_api_call, record_booking_attempt, record_booking_success, record_booking_failure
     from .. import config as app_config
     from .http_client import get_client
+    from .circuit_breaker import calendario_cb
 except ImportError:
     from citas.logger import get_logger
     from citas.metrics import track_api_call, record_booking_attempt, record_booking_success, record_booking_failure
     from citas import config as app_config
     from citas.services.http_client import get_client
+    from citas.services.circuit_breaker import calendario_cb
 
 logger = get_logger(__name__)
 
@@ -63,7 +65,7 @@ async def confirm_booking(
     duracion_cita_minutos: int = 60,
     correo_usuario: str = "",
     log_create_booking_apis: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Crea un evento en el calendario (ws_calendario.php, CREAR_EVENTO).
 
@@ -109,6 +111,16 @@ async def confirm_booking(
             "agendar_usuario": agendar_usuario,
         }
 
+        # Circuit breaker: si ws_calendario.php acumula 3 TransportErrors → fallo rápido
+        if calendario_cb.is_open("global"):
+            logger.warning("[BOOKING] Circuit abierto para ws_calendario.php — fallo rápido")
+            record_booking_failure("circuit_open")
+            return {
+                "success": False,
+                "message": "El servicio de calendario no está disponible en este momento. Por favor intenta en unos minutos.",
+                "error": "circuit_open",
+            }
+
         if log_create_booking_apis:
             logger.info("[create_booking] API 3: ws_calendario.php - CREAR_EVENTO")
             logger.info("  URL: %s", app_config.API_CALENDAR_URL)
@@ -130,6 +142,7 @@ async def confirm_booking(
         if data.get("success"):
             message = data.get("message") or "Evento creado correctamente"
             logger.info("[BOOKING] Evento creado - %s", message)
+            calendario_cb.record_success("global")
             record_booking_success()
             result = {
                 "success": True,
@@ -154,6 +167,7 @@ async def confirm_booking(
             }
 
     except httpx.TimeoutException:
+        calendario_cb.record_failure("global")
         logger.error("[BOOKING] Timeout al crear evento")
         record_booking_failure("timeout")
         return {
@@ -163,6 +177,7 @@ async def confirm_booking(
         }
 
     except httpx.HTTPStatusError as e:
+        # El servidor respondió con error HTTP → no abre el circuit (está up)
         logger.error("[BOOKING] Error HTTP %s: %s", e.response.status_code, e)
         record_booking_failure(f"http_{e.response.status_code}")
         return {
@@ -172,6 +187,7 @@ async def confirm_booking(
         }
 
     except httpx.RequestError as e:
+        calendario_cb.record_failure("global")
         logger.error("[BOOKING] Error de conexión: %s", e)
         record_booking_failure("connection_error")
         return {

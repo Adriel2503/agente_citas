@@ -1,20 +1,16 @@
 """
 Horario de reuniones: fetch desde API MaravIA y formateo para system prompt.
-Usa OBTENER_HORARIO_REUNIONES (ws_informacion_ia.php).
+Usa OBTENER_HORARIO_REUNIONES (ws_informacion_ia.php) a través de horario_cache.
 """
 
-from typing import Any, Dict, Optional
-
-import httpx
+from typing import Any
 
 try:
-    from .. import config as app_config
     from ..logger import get_logger
-    from .http_client import get_client
+    from .horario_cache import get_horario
 except ImportError:
-    from citas import config as app_config
     from citas.logger import get_logger
-    from citas.services.http_client import get_client
+    from citas.services.horario_cache import get_horario
 
 logger = get_logger(__name__)
 
@@ -29,7 +25,7 @@ _DIAS_ORDEN = [
 ]
 
 
-def format_horario_for_system_prompt(horario_reuniones: Dict[str, Any]) -> str:
+def format_horario_for_system_prompt(horario_reuniones: dict[str, Any]) -> str:
     """
     Formatea el horario de reuniones para inyectar en el system prompt.
     Estructura: lista por día con rango de hora o "Cerrado".
@@ -58,9 +54,10 @@ def format_horario_for_system_prompt(horario_reuniones: Dict[str, Any]) -> str:
     return "\n".join(lineas)
 
 
-async def fetch_horario_reuniones(id_empresa: Optional[Any]) -> str:
+async def fetch_horario_reuniones(id_empresa: Any | None) -> str:
     """
-    Obtiene el horario de reuniones desde la API y lo devuelve formateado para el system prompt.
+    Obtiene el horario de reuniones desde la cache/API y lo devuelve formateado
+    para el system prompt.
 
     Args:
         id_empresa: ID de la empresa (int o str). Si es None, retorna mensaje por defecto.
@@ -71,32 +68,14 @@ async def fetch_horario_reuniones(id_empresa: Optional[Any]) -> str:
     if id_empresa is None or id_empresa == "":
         return "No hay horario cargado."
 
-    payload = {
-        "codOpe": "OBTENER_HORARIO_REUNIONES",
-        "id_empresa": id_empresa,
-    }
-    try:
-        logger.debug("[HORARIO] Obteniendo horario para id_empresa=%s", id_empresa)
-        client = get_client()
-        response = await client.post(app_config.API_INFORMACION_URL, json=payload)
-        response.raise_for_status()
-        data = response.json()
-        if not data.get("success"):
-            logger.warning("[HORARIO] API no success: %s", data.get("error"))
-            return "No hay horario cargado."
-        horario = data.get("horario_reuniones")
-        if not horario:
-            return "No hay horario cargado."
-        return format_horario_for_system_prompt(horario)
-    except httpx.TimeoutException:
-        logger.warning("[HORARIO] Timeout al obtener horario para system prompt")
+    logger.debug("[HORARIO] Obteniendo horario para id_empresa=%s", id_empresa)
+    horario = await get_horario(id_empresa)
+    if not horario:
+        logger.info("[HORARIO] Sin horario para id_empresa=%s", id_empresa)
         return "No hay horario cargado."
-    except httpx.RequestError as e:
-        logger.warning("[HORARIO] Error al obtener horario para system prompt: %s", e)
-        return "No hay horario cargado."
-    except Exception as e:
-        logger.warning("[HORARIO] Error inesperado: %s", e)
-        return "No hay horario cargado."
+
+    logger.info("[HORARIO] Horario cargado para id_empresa=%s", id_empresa)
+    return format_horario_for_system_prompt(horario)
 
 
 __all__ = ["fetch_horario_reuniones", "format_horario_for_system_prompt"]

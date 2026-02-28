@@ -3,7 +3,7 @@ __pycache__
 *$py.class
 .venv
 venv
-venv_agent_reservas
+venv_agent_citas
 .env
 .git
 .gitignore
