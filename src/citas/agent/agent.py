@@ -8,6 +8,8 @@ import re
 from typing import Any
 from dataclasses import dataclass
 
+import openai
+
 from cachetools import TTLCache
 from langchain.agents import create_agent
 from langchain.chat_models import init_chat_model
@@ -405,21 +407,52 @@ async def process_cita_message(
 
             structured = result.get("structured_response")
             if isinstance(structured, CitaStructuredResponse):
-                reply = structured.reply or "Lo siento, no pude procesar tu solicitud."
+                if structured.reply is None:
+                    logger.warning("[AGENT] structured.reply es None - Session: %s", session_id)
+                    reply = "No recibí respuesta del asistente, por favor intenta nuevamente."
+                elif structured.reply == "":
+                    logger.warning("[AGENT] structured.reply es string vacío - Session: %s", session_id)
+                    reply = "El asistente envió una respuesta vacía, por favor intenta nuevamente."
+                else:
+                    reply = structured.reply
                 url = structured.url if (structured.url and structured.url.strip()) else None
             else:
+                logger.warning("[AGENT] Respuesta fuera de formato estructurado - Session: %s", session_id)
                 messages = result.get("messages", [])
                 if messages:
                     last_message = messages[-1]
                     reply = last_message.content if hasattr(last_message, "content") else str(last_message)
+                    if not reply:
+                        logger.warning("[AGENT] last_message.content vacío - Session: %s", session_id)
+                        reply = "El asistente respondió en un formato inesperado, por favor intenta nuevamente."
                 else:
-                    reply = "Lo siento, no pude procesar tu solicitud."
+                    reply = "El asistente respondió en un formato inesperado, por favor intenta nuevamente."
                 url = None
 
             logger.debug("[AGENT] Respuesta generada: %s...", (reply[:200], url))
 
+        except openai.AuthenticationError as e:
+            logger.critical("[AGENT][OpenAI-401] API key inválida - Session: %s | %s", session_id, e)
+            record_chat_error("openai_auth_error")
+            return ("No puedo procesar tu mensaje, la clave de acceso al servicio no es válida.", None)
+        except openai.RateLimitError as e:
+            logger.warning("[AGENT][OpenAI-429] Rate limit alcanzado - Session: %s | %s", session_id, e)
+            record_chat_error("openai_rate_limit")
+            return ("Estoy recibiendo demasiadas solicitudes en este momento, por favor intenta en unos segundos.", None)
+        except openai.InternalServerError as e:
+            logger.error("[AGENT][OpenAI-5xx] Error interno OpenAI - Session: %s | %s", session_id, e)
+            record_chat_error("openai_server_error")
+            return ("El servicio de inteligencia artificial está presentando problemas, por favor intenta nuevamente.", None)
+        except openai.APIConnectionError as e:
+            logger.error("[AGENT][OpenAI-conn] Error de conexión con OpenAI - Session: %s | %s", session_id, e)
+            record_chat_error("openai_connection_error")
+            return ("No pude conectarme al servicio de inteligencia artificial, por favor intenta nuevamente.", None)
+        except openai.BadRequestError as e:
+            logger.warning("[AGENT][OpenAI-400] Bad request - Session: %s | %s", session_id, e)
+            record_chat_error("openai_bad_request")
+            return ("Tu mensaje no pudo ser procesado por el servicio, ¿puedes reformularlo?", None)
         except Exception as e:
-            logger.error("[AGENT] Error al ejecutar agent: %s", e, exc_info=True)
+            logger.error("[AGENT] Error inesperado (%s) - Session: %s | %s", type(e).__name__, session_id, e, exc_info=True)
             record_chat_error("agent_execution_error")
             return ("Disculpa, tuve un problema al procesar tu mensaje. ¿Podrías intentar nuevamente?", None)
 
