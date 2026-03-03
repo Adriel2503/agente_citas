@@ -12,7 +12,9 @@ import openai
 
 from cachetools import TTLCache
 from langchain.agents import create_agent
+from langchain.agents.middleware import wrap_model_call, ModelRequest, ModelResponse
 from langchain.chat_models import init_chat_model
+from langchain_core.messages import trim_messages
 from langgraph.checkpoint.memory import InMemorySaver
 from pydantic import BaseModel
 
@@ -179,6 +181,26 @@ def _cleanup_stale_session_locks(current_session_id: int) -> None:
         logger.debug("[AGENT] Limpieza de session locks: %s eliminados", removed)
 
 
+@wrap_model_call
+async def _message_window(request: ModelRequest, handler) -> ModelResponse:
+    """Limita los mensajes enviados al LLM a MAX_MESSAGES_HISTORY.
+    No modifica el checkpointer — solo recorta lo que ve el LLM en cada llamada.
+    Compatible con Redis (C1): el historial completo se preserva en el checkpointer.
+    """
+    if not request.messages:
+        return await handler(request)
+    trimmed = trim_messages(
+        list(request.messages),
+        max_tokens=app_config.MAX_MESSAGES_HISTORY,
+        strategy="last",
+        token_counter=len,      # cuenta mensajes, no tokens reales
+        allow_partial=False,    # nunca corta un par AI↔Tool
+        include_system=True,    # preserva el system prompt
+        start_on="human",       # el recorte siempre empieza en msg del usuario
+    )
+    return await handler(request.override(messages=trimmed))
+
+
 def _get_model():
     """
     Retorna el modelo LLM singleton, creándolo en la primera llamada.
@@ -255,6 +277,7 @@ async def _get_agent(config: dict[str, Any]):
                 system_prompt=system_prompt,
                 checkpointer=_checkpointer,
                 response_format=CitaStructuredResponse,
+                middleware=[_message_window],
             )
 
             _agent_cache[cache_key] = agent
