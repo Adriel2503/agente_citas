@@ -14,17 +14,19 @@ try:
     from ..metrics import track_api_call
     from .. import config as app_config
     from .http_client import post_with_logging
-    from .horario_cache import get_horario
+    from .horario_cache import get_horario as _default_get_horario
     from .circuit_breaker import agendar_reunion_cb
     from ._resilience import resilient_call
+    from .time_parser import parse_time, parse_time_range, is_time_blocked
 except ImportError:
     from citas.logger import get_logger
     from citas.metrics import track_api_call
     from citas import config as app_config
     from citas.services.http_client import post_with_logging
-    from citas.services.horario_cache import get_horario
+    from citas.services.horario_cache import get_horario as _default_get_horario
     from citas.services.circuit_breaker import agendar_reunion_cb
     from citas.services._resilience import resilient_call
+    from citas.services.time_parser import parse_time, parse_time_range, is_time_blocked
 
 logger = get_logger(__name__)
 
@@ -68,6 +70,7 @@ class ScheduleValidator:
         agendar_usuario: int = 0,
         agendar_sucursal: int = 0,
         log_create_booking_apis: bool = False,
+        horario_fetcher=None,
     ):
         self.id_empresa = id_empresa
         self.duracion_cita = timedelta(minutes=duracion_cita_minutos)
@@ -77,100 +80,7 @@ class ScheduleValidator:
         self.agendar_usuario = agendar_usuario
         self.agendar_sucursal = agendar_sucursal
         self.log_create_booking_apis = log_create_booking_apis
-
-    def _parse_time(self, time_str: str) -> datetime | None:
-        """
-        Parsea una hora en formato HH:MM AM/PM o HH:MM.
-        
-        Args:
-            time_str: String con la hora
-        
-        Returns:
-            Objeto datetime con la hora parseada o None si hay error
-        """
-        time_str = time_str.strip().upper()
-
-        # Intentar formato 12 horas (HH:MM AM/PM)
-        for fmt in ["%I:%M %p", "%I:%M%p", "%H:%M"]:
-            try:
-                return datetime.strptime(time_str, fmt)
-            except ValueError:
-                continue
-
-        return None
-
-    def _parse_time_range(self, range_str: str) -> tuple[datetime, datetime] | None:
-        """
-        Parsea un rango de horario como '09:00-18:00' o '9:00 AM - 6:00 PM'.
-        
-        Args:
-            range_str: String con el rango de horas
-        
-        Returns:
-            Tupla (hora_inicio, hora_fin) o None si hay error
-        """
-        if not range_str:
-            return None
-
-        # Normalizar: quitar espacios y separar por "-"
-        parts = range_str.replace(" ", "").split("-")
-        if len(parts) != 2:
-            return None
-
-        start = self._parse_time(parts[0].strip())
-        end = self._parse_time(parts[1].strip())
-
-        if start and end:
-            return (start, end)
-        return None
-
-    def _is_time_blocked(self, fecha: datetime, hora: datetime, horarios_bloqueados: str) -> bool:
-        """
-        Verifica si la hora está en los horarios bloqueados.
-        
-        Args:
-            fecha: Fecha de la cita
-            hora: Hora de la cita
-            horarios_bloqueados: String JSON o CSV con horarios bloqueados
-        
-        Returns:
-            True si está bloqueado, False en caso contrario
-        """
-        if not horarios_bloqueados:
-            return False
-
-        try:
-            # Formato esperado: JSON array o string separado por comas
-            try:
-                bloqueados = json.loads(horarios_bloqueados)
-            except json.JSONDecodeError:
-                bloqueados = [b.strip() for b in horarios_bloqueados.split(",")]
-
-            fecha_str = fecha.strftime("%Y-%m-%d")
-
-            for bloqueo in bloqueados:
-                if isinstance(bloqueo, dict):
-                    if bloqueo.get("fecha") == fecha_str:
-                        inicio = self._parse_time(bloqueo.get("inicio", ""))
-                        fin = self._parse_time(bloqueo.get("fin", ""))
-                        if inicio and fin:
-                            if inicio.time() <= hora.time() < fin.time():
-                                logger.debug("[BLOCKED] Hora %s está bloqueada", hora.time())
-                                return True
-                elif isinstance(bloqueo, str):
-                    if fecha_str in bloqueo:
-                        time_part = bloqueo.replace(fecha_str, "").strip()
-                        rango = self._parse_time_range(time_part)
-                        if rango:
-                            inicio, fin = rango
-                            if inicio.time() <= hora.time() < fin.time():
-                                logger.debug("[BLOCKED] Hora %s está bloqueada", hora.time())
-                                return True
-
-        except Exception as e:
-            logger.warning("[SCHEDULE] Error parseando horarios bloqueados: %s", e)
-
-        return False
+        self._get_horario = horario_fetcher or _default_get_horario
 
     async def _check_availability(self, fecha_str: str, hora_str: str) -> dict[str, Any]:
         """
@@ -187,7 +97,7 @@ class ScheduleValidator:
         """
         try:
             fecha = datetime.strptime(fecha_str, "%Y-%m-%d")
-            hora = self._parse_time(hora_str)
+            hora = parse_time(hora_str)
             if not hora:
                 return {"available": True, "error": None}
 
@@ -268,7 +178,7 @@ class ScheduleValidator:
             return {"valid": False, "error": f"Formato de fecha inválido. Usa el formato YYYY-MM-DD (ejemplo: 2026-01-25)."}
 
         # 2. Parsear hora
-        hora = self._parse_time(hora_str)
+        hora = parse_time(hora_str)
         if not hora:
             return {"valid": False, "error": f"Formato de hora inválido. Usa el formato HH:MM AM/PM (ejemplo: 10:30 AM)."}
 
@@ -281,7 +191,7 @@ class ScheduleValidator:
             return {"valid": False, "error": "La fecha y hora seleccionada ya pasó. Por favor elige una fecha y hora futura."}
 
         # 5. Obtener horario de reuniones (cache compartida con horario_reuniones)
-        schedule = await get_horario(self.id_empresa)
+        schedule = await self._get_horario(self.id_empresa)
         if not schedule:
             logger.warning("[SCHEDULE] No se pudo obtener horario, permitiendo cita")
             return {"valid": True, "error": None}
@@ -301,7 +211,7 @@ class ScheduleValidator:
             return {"valid": False, "error": f"No hay atención el día {nombre_dia}. Por favor elige otro día."}
 
         # 8. Parsear el rango de horario del día
-        rango = self._parse_time_range(horario_dia)
+        rango = parse_time_range(horario_dia)
         if not rango:
             logger.warning("[SCHEDULE] No se pudo parsear horario del día: %s", horario_dia)
             return {"valid": True, "error": None}
@@ -328,7 +238,7 @@ class ScheduleValidator:
 
         # 11. Validar horarios bloqueados
         horarios_bloqueados = schedule.get("horarios_bloqueados", "")
-        if self._is_time_blocked(fecha, hora, horarios_bloqueados):
+        if is_time_blocked(fecha, hora, horarios_bloqueados, logger=logger):
             return {"valid": False, "error": "El horario seleccionado está bloqueado. Por favor elige otra hora."}
 
         # 12. Verificar disponibilidad contra citas existentes
