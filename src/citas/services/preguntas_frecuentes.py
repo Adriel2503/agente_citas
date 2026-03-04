@@ -1,12 +1,10 @@
 """
 Preguntas frecuentes: fetch desde API MaravIA (ws_preguntas_frecuentes.php) para el system prompt.
 Formato Pregunta/Respuesta para que el modelo entienda y use las FAQs.
+Sin cache propio: el agente (TTL 60 min) ya cachea el system prompt completo.
 """
 
-import asyncio
 from typing import Any
-
-from cachetools import TTLCache
 
 try:
     from .. import config as app_config
@@ -22,12 +20,6 @@ except ImportError:
     from citas.services._resilience import resilient_call
 
 logger = get_logger(__name__)
-
-# Cache TTL por id_chatbot (1 hora), mismo criterio que contexto_negocio
-_preguntas_cache: TTLCache = TTLCache(maxsize=500, ttl=3600)
-
-# Lock por id_chatbot para evitar thundering herd (mismo patrón que horario_cache).
-_fetch_locks: dict[Any, asyncio.Lock] = {}
 
 
 def format_preguntas_frecuentes_para_prompt(items: list[dict[str, Any]]) -> str:
@@ -60,7 +52,8 @@ def format_preguntas_frecuentes_para_prompt(items: list[dict[str, Any]]) -> str:
 async def fetch_preguntas_frecuentes(id_chatbot: Any | None) -> str:
     """
     Obtiene las preguntas frecuentes desde la API para inyectar en el system prompt.
-    Usa cache TTL por id_chatbot. Body: {"id_chatbot": id_chatbot}.
+    Circuit breaker compartido (preguntas_cb): 3 fallos → abierto 5 min.
+    El retry con backoff lo gestiona post_with_logging (tenacity).
 
     Args:
         id_chatbot: ID del chatbot (int o str). Si es None o vacío, retorna "".
@@ -71,54 +64,31 @@ async def fetch_preguntas_frecuentes(id_chatbot: Any | None) -> str:
     if id_chatbot is None or id_chatbot == "":
         return ""
 
-    # Cache
-    if id_chatbot in _preguntas_cache:
-        cached = _preguntas_cache[id_chatbot]
-        logger.debug(
-            "[PREGUNTAS_FRECUENTES] Cache hit id_chatbot=%s (valor=%s)",
-            id_chatbot,
-            "vacío" if not cached else "presente",
-        )
-        logger.info("[PREGUNTAS_FRECUENTES] Respuesta recibida id_chatbot=%s (cache)", id_chatbot)
-        return cached if cached else ""
-
-    # Fast reject: evita adquirir el lock cuando el circuito está abierto
     if preguntas_cb.is_open(id_chatbot):
         return ""
 
-    # Serializar fetch por id_chatbot (thundering herd prevention)
-    lock = _fetch_locks.setdefault(id_chatbot, asyncio.Lock())
-    async with lock:
-        # Double-check: otra coroutine pudo llenar el cache mientras esperábamos
-        if id_chatbot in _preguntas_cache:
-            cached = _preguntas_cache[id_chatbot]
-            return cached if cached else ""
+    payload = {"id_chatbot": id_chatbot}
+    logger.debug("[PREGUNTAS_FRECUENTES] Obteniendo FAQs id_chatbot=%s", id_chatbot)
 
-        payload = {"id_chatbot": id_chatbot}
-        try:
-            logger.debug("[PREGUNTAS_FRECUENTES] Obteniendo FAQs id_chatbot=%s", id_chatbot)
-            data = await resilient_call(
-                lambda: post_with_logging(app_config.API_PREGUNTAS_FRECUENTES_URL, payload),
-                cb=preguntas_cb,
-                circuit_key=id_chatbot,
-                service_name="PREGUNTAS_FRECUENTES",
-            )
-            if not data.get("success"):
-                logger.info("[PREGUNTAS_FRECUENTES] Respuesta recibida id_chatbot=%s, API sin éxito: %s", id_chatbot, data.get("error"))
-                return ""
-            items = data.get("preguntas_frecuentes") or []
-            if not items:
-                logger.info("[PREGUNTAS_FRECUENTES] Respuesta recibida id_chatbot=%s, sin preguntas", id_chatbot)
-                return ""
-            logger.info("[PREGUNTAS_FRECUENTES] Respuesta recibida id_chatbot=%s, %s preguntas", id_chatbot, len(items))
-            formatted = format_preguntas_frecuentes_para_prompt(items)
-            _preguntas_cache[id_chatbot] = formatted
-            return formatted
-        except Exception as e:
-            logger.info("[PREGUNTAS_FRECUENTES] No se pudo obtener FAQs id_chatbot=%s: %s", id_chatbot, e)
+    try:
+        data = await resilient_call(
+            lambda: post_with_logging(app_config.API_PREGUNTAS_FRECUENTES_URL, payload),
+            cb=preguntas_cb,
+            circuit_key=id_chatbot,
+            service_name="PREGUNTAS_FRECUENTES",
+        )
+        if not data.get("success"):
+            logger.info("[PREGUNTAS_FRECUENTES] API sin éxito id_chatbot=%s: %s", id_chatbot, data.get("error"))
             return ""
-        finally:
-            _fetch_locks.pop(id_chatbot, None)
+        items = data.get("preguntas_frecuentes") or []
+        if not items:
+            logger.info("[PREGUNTAS_FRECUENTES] Sin preguntas id_chatbot=%s", id_chatbot)
+            return ""
+        logger.info("[PREGUNTAS_FRECUENTES] %s preguntas obtenidas id_chatbot=%s", len(items), id_chatbot)
+        return format_preguntas_frecuentes_para_prompt(items)
+    except Exception as e:
+        logger.info("[PREGUNTAS_FRECUENTES] No se pudo obtener id_chatbot=%s: %s", id_chatbot, e)
+        return ""
 
 
 __all__ = ["fetch_preguntas_frecuentes", "format_preguntas_frecuentes_para_prompt"]
