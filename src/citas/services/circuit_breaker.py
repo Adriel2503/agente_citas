@@ -138,7 +138,7 @@ calendario_cb: CircuitBreaker = _register(CircuitBreaker(
 ))
 
 # Keyed by id_empresa. Lecturas: CONSULTAR_DISPONIBILIDAD, SUGERIR_HORARIOS.
-# Usado por: schedule_validator
+# Usado por: schedule_validator, schedule_recommender
 agendar_reunion_cb: CircuitBreaker = _register(CircuitBreaker(
     name="ws_agendar_reunion",
     threshold=app_config.CB_THRESHOLD,

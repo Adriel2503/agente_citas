@@ -1,6 +1,6 @@
 """
 Servicios del agente de citas: booking, horario_reuniones, schedule_validator,
-productos_servicios_citas, busqueda_productos.
+schedule_recommender, productos_servicios_citas, busqueda_productos.
 """
 
 from .http_client import get_client, close_http_client

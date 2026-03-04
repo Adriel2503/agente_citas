@@ -35,7 +35,7 @@ DIAS_ORDEN: list[tuple[str, str]] = [
     ("Domingo",   "reunion_domingo"),
 ]
 
-# Mapeo día de semana en inglés → nombre en español. Usado por schedule_validator.
+# Mapeo día de semana en inglés → nombre en español. Usado por schedule_recommender.
 DIAS_ESPANOL: dict[str, str] = {
     "Monday": "Lunes",
     "Tuesday": "Martes",
