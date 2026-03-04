@@ -6,6 +6,28 @@ Testeables de forma aislada.
 import json
 from datetime import datetime
 
+# Mapeo int(weekday) → campo BD. Compartido por schedule_validator y horario_reuniones.
+DAY_FIELD_MAP: dict[int, str] = {
+    0: "reunion_lunes",
+    1: "reunion_martes",
+    2: "reunion_miercoles",
+    3: "reunion_jueves",
+    4: "reunion_viernes",
+    5: "reunion_sabado",
+    6: "reunion_domingo",
+}
+
+# Lista ordenada (nombre display, campo BD). Usada por horario_reuniones.
+DIAS_ORDEN: list[tuple[str, str]] = [
+    ("Lunes",     "reunion_lunes"),
+    ("Martes",    "reunion_martes"),
+    ("Miércoles", "reunion_miercoles"),
+    ("Jueves",    "reunion_jueves"),
+    ("Viernes",   "reunion_viernes"),
+    ("Sábado",    "reunion_sabado"),
+    ("Domingo",   "reunion_domingo"),
+]
+
 
 def parse_time(time_str: str) -> datetime | None:
     """Parsea una hora en formato HH:MM AM/PM o HH:MM."""
@@ -88,4 +110,4 @@ def is_time_blocked(
     return False
 
 
-__all__ = ["parse_time", "parse_time_range", "is_time_blocked"]
+__all__ = ["parse_time", "parse_time_range", "is_time_blocked", "DAY_FIELD_MAP", "DIAS_ORDEN"]

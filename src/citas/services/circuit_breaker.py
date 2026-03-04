@@ -52,10 +52,7 @@ class CircuitBreaker:
 
     def is_open(self, key: Any) -> bool:
         """True si el circuit está abierto para esta key → el llamador debe usar fallback."""
-        if self._failures.get(key, 0) >= self._threshold:
-            logger.warning("[CB:%s] Circuit ABIERTO para key=%s", self.name, key)
-            return True
-        return False
+        return self._failures.get(key, 0) >= self._threshold
 
     def record_failure(self, key: Any) -> None:
         """

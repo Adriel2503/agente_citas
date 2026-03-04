@@ -17,7 +17,7 @@ try:
     from .horario_cache import get_horario as _default_get_horario
     from .circuit_breaker import agendar_reunion_cb
     from ._resilience import resilient_call
-    from .time_parser import parse_time, parse_time_range, is_time_blocked
+    from .time_parser import parse_time, parse_time_range, is_time_blocked, DAY_FIELD_MAP
 except ImportError:
     from citas.logger import get_logger
     from citas.metrics import track_api_call
@@ -26,20 +26,9 @@ except ImportError:
     from citas.services.horario_cache import get_horario as _default_get_horario
     from citas.services.circuit_breaker import agendar_reunion_cb
     from citas.services._resilience import resilient_call
-    from citas.services.time_parser import parse_time, parse_time_range, is_time_blocked
+    from citas.services.time_parser import parse_time, parse_time_range, is_time_blocked, DAY_FIELD_MAP
 
 logger = get_logger(__name__)
-
-# Mapeo de día de la semana a campo de la base de datos
-DAY_MAPPING = {
-    0: "reunion_lunes",
-    1: "reunion_martes",
-    2: "reunion_miercoles",
-    3: "reunion_jueves",
-    4: "reunion_viernes",
-    5: "reunion_sabado",
-    6: "reunion_domingo"
-}
 
 # Días en español para formateo de sugerencias
 DIAS_ESPANOL = {
@@ -198,7 +187,7 @@ class ScheduleValidator:
 
         # 6. Obtener el día de la semana
         dia_semana = fecha.weekday()  # 0=Lunes, 6=Domingo
-        campo_dia = DAY_MAPPING.get(dia_semana)
+        campo_dia = DAY_FIELD_MAP.get(dia_semana)
         horario_dia = schedule.get(campo_dia)
         nombre_dia = _DIAS_NOMBRE[dia_semana]
 

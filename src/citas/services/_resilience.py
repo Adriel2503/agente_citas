@@ -74,9 +74,6 @@ async def resilient_call(
         )
         cb.record_failure(circuit_key)
         raise
-    except Exception:
-        # HTTPStatusError, errores de negocio, etc. no afectan el circuit breaker.
-        raise
 
 
 __all__ = ["resilient_call"]

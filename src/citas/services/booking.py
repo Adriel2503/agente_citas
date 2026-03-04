@@ -5,7 +5,6 @@ correo_cliente, correo_usuario, agendar_usuario.
 """
 
 import json
-import re
 from datetime import datetime, timedelta
 
 import httpx
@@ -17,34 +16,24 @@ try:
     from .. import config as app_config
     from .http_client import get_client
     from .circuit_breaker import calendario_cb
+    from .time_parser import parse_time
 except ImportError:
     from citas.logger import get_logger
     from citas.metrics import track_api_call, record_booking_attempt, record_booking_success, record_booking_failure
     from citas import config as app_config
     from citas.services.http_client import get_client
     from citas.services.circuit_breaker import calendario_cb
+    from citas.services.time_parser import parse_time
 
 logger = get_logger(__name__)
 
 
-def _parse_time_to_24h(hora: str) -> str:
-    """Convierte hora en formato HH:MM AM/PM a HH:MM (24h)."""
-    hora = hora.strip()
-    match = re.match(r"(\d{1,2}):(\d{2})\s*(AM|PM)", hora, re.IGNORECASE)
-    if not match:
-        raise ValueError(f"Hora no válida (esperado HH:MM AM/PM): {hora}")
-    h, m, ampm = int(match.group(1)), int(match.group(2)), match.group(3).upper()
-    if ampm == "PM" and h != 12:
-        h += 12
-    elif ampm == "AM" and h == 12:
-        h = 0
-    return f"{h:02d}:{m:02d}:00"
-
-
 def _build_fecha_inicio_fin(fecha: str, hora: str, duracion_minutos: int) -> tuple:
     """Construye fecha_inicio y fecha_fin en formato YYYY-MM-DD HH:MM:SS."""
-    time_24 = _parse_time_to_24h(hora)
-    fecha_inicio = f"{fecha} {time_24}"
+    hora_dt = parse_time(hora)
+    if not hora_dt:
+        raise ValueError(f"Hora no válida (esperado HH:MM AM/PM): {hora}")
+    fecha_inicio = f"{fecha} {hora_dt.strftime('%H:%M:%S')}"
     try:
         dt_start = datetime.strptime(fecha_inicio, "%Y-%m-%d %H:%M:%S")
     except ValueError:

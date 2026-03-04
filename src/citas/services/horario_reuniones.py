@@ -8,21 +8,13 @@ from typing import Any
 try:
     from ..logger import get_logger
     from .horario_cache import get_horario
+    from .time_parser import DIAS_ORDEN
 except ImportError:
     from citas.logger import get_logger
     from citas.services.horario_cache import get_horario
+    from citas.services.time_parser import DIAS_ORDEN
 
 logger = get_logger(__name__)
-
-_DIAS_ORDEN = [
-    ("Lunes", "reunion_lunes"),
-    ("Martes", "reunion_martes"),
-    ("Miércoles", "reunion_miercoles"),
-    ("Jueves", "reunion_jueves"),
-    ("Viernes", "reunion_viernes"),
-    ("Sábado", "reunion_sabado"),
-    ("Domingo", "reunion_domingo"),
-]
 
 
 def format_horario_for_system_prompt(horario_reuniones: dict[str, Any]) -> str:
@@ -41,7 +33,7 @@ def format_horario_for_system_prompt(horario_reuniones: dict[str, Any]) -> str:
         return "No hay horario cargado."
 
     lineas = []
-    for nombre_dia, clave in _DIAS_ORDEN:
+    for nombre_dia, clave in DIAS_ORDEN:
         valor = horario_reuniones.get(clave)
         if valor and str(valor).strip():
             rango = str(valor).strip().replace("-", " - ")
