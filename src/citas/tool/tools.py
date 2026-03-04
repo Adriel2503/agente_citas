@@ -11,6 +11,7 @@ from langchain.tools import tool, ToolRuntime
 
 try:
     from ..services.schedule_validator import ScheduleValidator
+    from ..services.schedule_recommender import ScheduleRecommender
     from ..services.booking import confirm_booking
     from ..services.busqueda_productos import buscar_productos_servicios, format_productos_para_respuesta
     from ..logger import get_logger
@@ -18,6 +19,7 @@ try:
     from ..validation import validate_booking_data, validate_date_format
 except ImportError:
     from citas.services.schedule_validator import ScheduleValidator
+    from citas.services.schedule_recommender import ScheduleRecommender
     from citas.services.booking import confirm_booking
     from citas.services.busqueda_productos import buscar_productos_servicios, format_productos_para_respuesta
     from citas.logger import get_logger
@@ -74,18 +76,14 @@ async def check_availability(
 
     try:
         with track_tool_execution("check_availability"):
-            # Crear validator con configuración
-            validator = ScheduleValidator(
+            recommender = ScheduleRecommender(
                 id_empresa=id_empresa,
                 duracion_cita_minutos=duracion_cita_minutos,
                 slots=slots,
-                es_cita=True,
                 agendar_usuario=agendar_usuario,
-                agendar_sucursal=agendar_sucursal
+                agendar_sucursal=agendar_sucursal,
             )
-            
-            # Obtener recomendaciones. Si viene time, se consulta CONSULTAR_DISPONIBILIDAD para ese slot primero.
-            recommendations = await validator.recommendation(
+            recommendations = await recommender.recommendation(
                 fecha_solicitada=date,
                 hora_solicitada=time.strip() if time and time.strip() else None,
             )
@@ -176,7 +174,6 @@ async def create_booking(
                 id_empresa=id_empresa,
                 duracion_cita_minutos=duracion_cita_minutos,
                 slots=slots,
-                es_cita=True,
                 agendar_usuario=agendar_usuario,
                 agendar_sucursal=agendar_sucursal,
                 log_create_booking_apis=True,

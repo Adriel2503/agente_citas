@@ -1,6 +1,9 @@
 """
 Validador de horarios para citas/reuniones.
-Versión mejorada con async, cache global y logging.
+Verifica formato, horario de atención, slots bloqueados y disponibilidad real.
+
+Responsabilidad única: validate() — responde "¿es válido este slot?"
+Para sugerencias de horarios disponibles, ver schedule_recommender.py.
 """
 
 import json
@@ -16,7 +19,7 @@ try:
     from .http_client import post_with_logging
     from .circuit_breaker import agendar_reunion_cb, informacion_cb
     from ._resilience import resilient_call
-    from .time_parser import parse_time, parse_time_range, is_time_blocked, DAY_FIELD_MAP, DIAS_ESPANOL, DIAS_NOMBRE
+    from .time_parser import parse_time, parse_time_range, is_time_blocked, DAY_FIELD_MAP, DIAS_NOMBRE
 except ImportError:
     from citas.logger import get_logger
     from citas.metrics import track_api_call
@@ -24,33 +27,110 @@ except ImportError:
     from citas.services.http_client import post_with_logging
     from citas.services.circuit_breaker import agendar_reunion_cb, informacion_cb
     from citas.services._resilience import resilient_call
-    from citas.services.time_parser import parse_time, parse_time_range, is_time_blocked, DAY_FIELD_MAP, DIAS_ESPANOL, DIAS_NOMBRE
+    from citas.services.time_parser import parse_time, parse_time_range, is_time_blocked, DAY_FIELD_MAP, DIAS_NOMBRE
 
 logger = get_logger(__name__)
 
 _ZONA_PERU = ZoneInfo(app_config.TIMEZONE)
 
 
-# ========== VALIDADOR DE HORARIOS ==========
+async def _check_slot_availability(
+    id_empresa: Any,
+    fecha_str: str,
+    hora_str: str,
+    duracion_cita: timedelta,
+    slots: int,
+    agendar_usuario: int,
+    agendar_sucursal: int,
+    log_api: bool = False,
+) -> dict[str, Any]:
+    """
+    Consulta CONSULTAR_DISPONIBILIDAD en ws_agendar_reunion.php.
+
+    Compartida por ScheduleValidator (validate) y ScheduleRecommender (recommendation).
+    Retorna graceful degradation (available=True) ante cualquier error de red/CB.
+    """
+    try:
+        fecha = datetime.strptime(fecha_str, "%Y-%m-%d")
+        hora = parse_time(hora_str)
+        if not hora:
+            return {"available": True, "error": None}
+
+        fecha_hora_inicio = fecha.replace(hour=hora.hour, minute=hora.minute)
+        fecha_hora_fin = fecha_hora_inicio + duracion_cita
+
+        payload = {
+            "codOpe": "CONSULTAR_DISPONIBILIDAD",
+            "id_empresa": id_empresa,
+            "fecha_inicio": fecha_hora_inicio.strftime("%Y-%m-%d %H:%M:%S"),
+            "fecha_fin": fecha_hora_fin.strftime("%Y-%m-%d %H:%M:%S"),
+            "slots": slots,
+            "agendar_usuario": agendar_usuario,
+            "agendar_sucursal": agendar_sucursal,
+        }
+
+        if log_api:
+            logger.info("[create_booking] API 2: ws_agendar_reunion.php - CONSULTAR_DISPONIBILIDAD")
+            logger.info("  URL: %s", app_config.API_AGENDAR_REUNION_URL)
+            logger.info("  Enviado: %s", json.dumps(payload, ensure_ascii=False))
+        logger.debug("[AVAILABILITY] Consultando: %s %s", fecha_str, hora_str)
+        logger.debug(
+            "[AVAILABILITY] JSON enviado a ws_agendar_reunion.php (CONSULTAR_DISPONIBILIDAD): %s",
+            json.dumps(payload, ensure_ascii=False, indent=2),
+        )
+
+        with track_api_call("consultar_disponibilidad"):
+            data = await resilient_call(
+                lambda: post_with_logging(app_config.API_AGENDAR_REUNION_URL, payload),
+                cb=agendar_reunion_cb,
+                circuit_key=id_empresa,
+                service_name="CONSULTAR_DISPONIBILIDAD",
+            )
+
+        if log_api:
+            logger.info("  Respuesta: %s", json.dumps(data, ensure_ascii=False))
+        logger.debug("[AVAILABILITY] Disponible: %s", data.get("disponible"))
+
+        if not data.get("success"):
+            logger.warning("[AVAILABILITY] Respuesta sin éxito: %s", data)
+            return {"available": True, "error": None}  # Graceful degradation
+
+        if data.get("disponible"):
+            return {"available": True, "error": None}
+        return {
+            "available": False,
+            "error": "El horario seleccionado ya está ocupado. Por favor elige otra hora o fecha.",
+        }
+
+    except RuntimeError:
+        logger.warning("[AVAILABILITY] Circuit abierto para ws_agendar_reunion")
+        return {"available": True, "error": None}
+    except httpx.TimeoutException:
+        logger.warning("[AVAILABILITY] Timeout - graceful degradation")
+        return {"available": True, "error": None}
+    except httpx.HTTPError as e:
+        logger.warning("[AVAILABILITY] Error HTTP: %s - graceful degradation", e)
+        return {"available": True, "error": None}
+    except Exception as e:
+        logger.warning("[AVAILABILITY] Error inesperado: %s - graceful degradation", e)
+        return {"available": True, "error": None}
+
 
 class ScheduleValidator:
-    """Validador de horarios para citas/reuniones con async y cache."""
+    """Valida si una fecha y hora son válidas para agendar una cita."""
 
     def __init__(
         self,
         id_empresa: int,
         duracion_cita_minutos: int = 60,
         slots: int = 60,
-        es_cita: bool = True,
         agendar_usuario: int = 0,
         agendar_sucursal: int = 0,
         log_create_booking_apis: bool = False,
     ):
         self.id_empresa = id_empresa
         self.duracion_cita = timedelta(minutes=duracion_cita_minutos)
-        self.duracion_minutos = duracion_cita_minutos
         self.slots = slots
-        self.es_cita = es_cita
         self.agendar_usuario = agendar_usuario
         self.agendar_sucursal = agendar_sucursal
         self.log_create_booking_apis = log_create_booking_apis
@@ -73,82 +153,6 @@ class ScheduleValidator:
             pass
         return None
 
-    async def _check_availability(self, fecha_str: str, hora_str: str) -> dict[str, Any]:
-        """
-        Verifica disponibilidad contra citas existentes.
-
-        Args:
-            fecha_str: Fecha en formato YYYY-MM-DD
-            hora_str: Hora en formato HH:MM AM/PM
-
-        Returns:
-            Dict con:
-            - available: bool
-            - error: str (mensaje si no está disponible)
-        """
-        try:
-            fecha = datetime.strptime(fecha_str, "%Y-%m-%d")
-            hora = parse_time(hora_str)
-            if not hora:
-                return {"available": True, "error": None}
-
-            fecha_hora_inicio = fecha.replace(hour=hora.hour, minute=hora.minute)
-            fecha_hora_fin = fecha_hora_inicio + self.duracion_cita
-
-            payload = {
-                "codOpe": "CONSULTAR_DISPONIBILIDAD",
-                "id_empresa": self.id_empresa,
-                "fecha_inicio": fecha_hora_inicio.strftime("%Y-%m-%d %H:%M:%S"),
-                "fecha_fin": fecha_hora_fin.strftime("%Y-%m-%d %H:%M:%S"),
-                "slots": self.slots,
-                "agendar_usuario": self.agendar_usuario,
-                "agendar_sucursal": self.agendar_sucursal
-            }
-
-            if self.log_create_booking_apis:
-                logger.info("[create_booking] API 2: ws_agendar_reunion.php - CONSULTAR_DISPONIBILIDAD")
-                logger.info("  URL: %s", app_config.API_AGENDAR_REUNION_URL)
-                logger.info("  Enviado: %s", json.dumps(payload, ensure_ascii=False))
-            logger.debug("[AVAILABILITY] Consultando: %s %s", fecha_str, hora_str)
-            logger.debug("[AVAILABILITY] JSON enviado a ws_agendar_reunion.php (CONSULTAR_DISPONIBILIDAD): %s", json.dumps(payload, ensure_ascii=False, indent=2))
-
-            with track_api_call("consultar_disponibilidad"):
-                data = await resilient_call(
-                    lambda: post_with_logging(app_config.API_AGENDAR_REUNION_URL, payload),
-                    cb=agendar_reunion_cb,
-                    circuit_key=self.id_empresa,
-                    service_name="CONSULTAR_DISPONIBILIDAD",
-                )
-
-            if self.log_create_booking_apis:
-                logger.info("  Respuesta: %s", json.dumps(data, ensure_ascii=False))
-            logger.debug("[AVAILABILITY] Disponible: %s", data.get("disponible"))
-
-            if not data.get("success"):
-                logger.warning("[AVAILABILITY] Respuesta sin éxito: %s", data)
-                return {"available": True, "error": None}  # Graceful degradation
-
-            if data.get("disponible"):
-                return {"available": True, "error": None}
-            else:
-                return {
-                    "available": False,
-                    "error": "El horario seleccionado ya está ocupado. Por favor elige otra hora o fecha."
-                }
-
-        except RuntimeError:
-            logger.warning("[AVAILABILITY] Circuit abierto para ws_agendar_reunion")
-            return {"available": True, "error": None}
-        except httpx.TimeoutException:
-            logger.warning("[AVAILABILITY] Timeout - graceful degradation")
-            return {"available": True, "error": None}
-        except httpx.HTTPError as e:
-            logger.warning("[AVAILABILITY] Error HTTP: %s - graceful degradation", e)
-            return {"available": True, "error": None}
-        except Exception as e:
-            logger.warning("[AVAILABILITY] Error inesperado: %s - graceful degradation", e)
-            return {"available": True, "error": None}
-
     async def validate(self, fecha_str: str, hora_str: str) -> dict[str, Any]:
         """
         Valida si la fecha y hora son válidas para agendar.
@@ -166,12 +170,12 @@ class ScheduleValidator:
         try:
             fecha = datetime.strptime(fecha_str, "%Y-%m-%d")
         except ValueError:
-            return {"valid": False, "error": f"Formato de fecha inválido. Usa el formato YYYY-MM-DD (ejemplo: 2026-01-25)."}
+            return {"valid": False, "error": "Formato de fecha inválido. Usa el formato YYYY-MM-DD (ejemplo: 2026-01-25)."}
 
         # 2. Parsear hora
         hora = parse_time(hora_str)
         if not hora:
-            return {"valid": False, "error": f"Formato de hora inválido. Usa el formato HH:MM AM/PM (ejemplo: 10:30 AM)."}
+            return {"valid": False, "error": "Formato de hora inválido. Usa el formato HH:MM AM/PM (ejemplo: 10:30 AM)."}
 
         # 3. Combinar fecha y hora
         fecha_hora_cita = fecha.replace(hour=hora.hour, minute=hora.minute)
@@ -224,7 +228,7 @@ class ScheduleValidator:
         if hora_fin_cita > hora_cierre:
             return {
                 "valid": False,
-                "error": f"La cita de {self.duracion_cita.seconds // 60} minutos excedería el horario de atención (cierre: {hora_fin.strftime('%I:%M %p')}). El horario del {nombre_dia} es de {horario_formateado}. Por favor elige una hora más temprana."
+                "error": f"La cita de {self.duracion_cita.seconds // 60} minutos excedería el horario de atención (cierre: {hora_fin.strftime('%I:%M %p')}). El horario del {nombre_dia} es de {horario_formateado}. Por favor elige una hora más temprana.",
             }
 
         # 11. Validar horarios bloqueados
@@ -233,132 +237,16 @@ class ScheduleValidator:
             return {"valid": False, "error": "El horario seleccionado está bloqueado. Por favor elige otra hora."}
 
         # 12. Verificar disponibilidad contra citas existentes
-        availability = await self._check_availability(fecha_str, hora_str)
+        availability = await _check_slot_availability(
+            self.id_empresa, fecha_str, hora_str, self.duracion_cita,
+            self.slots, self.agendar_usuario, self.agendar_sucursal,
+            self.log_create_booking_apis,
+        )
         if not availability["available"]:
             return {"valid": False, "error": availability["error"]}
 
         logger.debug("[VALIDATION] Horario válido: %s %s", fecha_str, hora_str)
         return {"valid": True, "error": None}
 
-    def _format_sugerencia(self, idx: int, sugerencia: dict) -> str | None:
-        dia = sugerencia.get("dia", "")
-        hora_legible = sugerencia.get("hora_legible", "")
-        if not dia or not hora_legible:
-            return None
-        disponible = sugerencia.get("disponible", True)
-        fecha_inicio = sugerencia.get("fecha_inicio", "")
-        if dia == "hoy":
-            texto = f"Hoy a las {hora_legible}"
-        elif dia == "mañana":
-            texto = f"Mañana a las {hora_legible}"
-        elif fecha_inicio:
-            try:
-                fecha_obj = datetime.strptime(fecha_inicio, "%Y-%m-%d %H:%M:%S")
-                dia_nombre = DIAS_ESPANOL.get(fecha_obj.strftime("%A"), fecha_obj.strftime("%A"))
-                texto = f"{dia_nombre} {fecha_obj.strftime('%d/%m')} a las {hora_legible}"
-            except ValueError:
-                texto = f"{dia} a las {hora_legible}"
-        else:
-            texto = f"{dia} a las {hora_legible}"
-        if not disponible:
-            texto += " (ocupado)"
-        return f"{idx}. {texto}"
 
-    async def recommendation(
-        self,
-        fecha_solicitada: str | None = None,
-        hora_solicitada: str | None = None,
-    ) -> dict[str, Any]:
-        """
-        Genera recomendaciones de horarios disponibles.
-        Si el cliente dio fecha Y hora concretas, primero consulta CONSULTAR_DISPONIBILIDAD para ese slot.
-        Si solo fecha (o hoy/mañana sin hora), usa SUGERIR_HORARIOS o horario del día.
-        
-        Args:
-            fecha_solicitada: Fecha en YYYY-MM-DD que el cliente está consultando. Opcional.
-            hora_solicitada: Hora en HH:MM AM/PM que el cliente indicó. Opcional. Si viene con fecha, se consulta disponibilidad exacta.
-        
-        Returns:
-            Dict con "text" y opcionalmente "recommendations", "total", "message"
-        """
-        now_peru = datetime.now(_ZONA_PERU)
-        hoy_iso = now_peru.strftime("%Y-%m-%d")
-        manana_iso = (now_peru + timedelta(days=1)).strftime("%Y-%m-%d")
-
-        # Si el cliente indicó fecha Y hora concretas, consultar disponibilidad exacta (CONSULTAR_DISPONIBILIDAD) primero
-        if fecha_solicitada and hora_solicitada and hora_solicitada.strip():
-            try:
-                availability = await self._check_availability(fecha_solicitada.strip(), hora_solicitada.strip())
-                if availability.get("available"):
-                    return {
-                        "text": f"El {fecha_solicitada} a las {hora_solicitada.strip()} está disponible. ¿Confirmamos la cita?"
-                    }
-                error_msg = availability.get("error") or "Ese horario no está disponible."
-                return {
-                    "text": f"{error_msg} ¿Te gustaría que te sugiera otros horarios?"
-                }
-            except Exception as e:
-                logger.warning("[RECOMMENDATION] Error al consultar disponibilidad para slot concreto: %s", e)
-                # Sigue con flujo normal (SUGERIR_HORARIOS)
-
-        # Si el cliente preguntó por una fecha que NO es hoy ni mañana, no usar SUGERIR_HORARIOS
-        # (solo devuelve hoy/mañana). El horario de atención se da desde el system prompt.
-        if fecha_solicitada:
-            try:
-                fecha_obj = datetime.strptime(fecha_solicitada.strip(), "%Y-%m-%d")
-                fecha_iso = fecha_obj.strftime("%Y-%m-%d")
-                if fecha_iso != hoy_iso and fecha_iso != manana_iso:
-                    return {"text": "Para esa fecha indica una hora que prefieras y la verifico."}
-            except ValueError:
-                pass
-
-        # 1. Intentar SUGERIR_HORARIOS (hoy y mañana)
-        payload = {
-            "codOpe": "SUGERIR_HORARIOS",
-            "id_empresa": self.id_empresa,
-            "duracion_minutos": self.duracion_minutos,
-            "slots": self.slots,
-            "agendar_usuario": self.agendar_usuario,
-            "agendar_sucursal": self.agendar_sucursal,
-        }
-
-        logger.debug("[RECOMMENDATION] JSON enviado a ws_agendar_reunion.php (SUGERIR_HORARIOS): %s", json.dumps(payload, ensure_ascii=False, indent=2))
-        try:
-            with track_api_call("sugerir_horarios"):
-                data = await resilient_call(
-                    lambda: post_with_logging(app_config.API_AGENDAR_REUNION_URL, payload),
-                    cb=agendar_reunion_cb,
-                    circuit_key=self.id_empresa,
-                    service_name="SUGERIR_HORARIOS",
-                )
-
-            if data.get("success"):
-                sugerencias = data.get("sugerencias", [])
-                mensaje = data.get("mensaje", "Horarios disponibles encontrados")
-                total = data.get("total", 0)
-                if sugerencias and total > 0:
-                    sugerencias_texto = []
-                    for i, sugerencia in enumerate(sugerencias, 1):
-                        texto = self._format_sugerencia(i, sugerencia)
-                        if texto:
-                            sugerencias_texto.append(texto)
-                    if sugerencias_texto:
-                        texto_final = f"{mensaje}\n\n" + "\n".join(sugerencias_texto) if mensaje else "Horarios sugeridos:\n\n" + "\n".join(sugerencias_texto)
-                        return {
-                            "text": texto_final,
-                            "recommendations": sugerencias,
-                            "total": total,
-                            "message": mensaje,
-                        }
-        except RuntimeError:
-            logger.warning("[RECOMMENDATION] Circuit abierto para ws_agendar_reunion")
-        except (httpx.TimeoutException, httpx.HTTPError) as e:
-            logger.warning("[RECOMMENDATION] Error en SUGERIR_HORARIOS, usando fallback: %s", e)
-        except Exception as e:
-            logger.warning("[RECOMMENDATION] Error inesperado en SUGERIR_HORARIOS: %s", e)
-
-        # 2. Fallback: sin llamar API (el horario de atención se da desde el system prompt)
-        return {"text": "No pude obtener sugerencias ahora. Indica una fecha y hora que prefieras y la verifico."}
-
-
-__all__ = ["ScheduleValidator"]
+__all__ = ["ScheduleValidator", "_check_slot_availability"]
