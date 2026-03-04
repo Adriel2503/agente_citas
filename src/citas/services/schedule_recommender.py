@@ -17,8 +17,8 @@ try:
     from ..metrics import track_api_call
     from .. import config as app_config
     from .http_client import post_with_logging
-    from .circuit_breaker import agendar_reunion_cb
-    from ._resilience import resilient_call
+    from .circuit_breaker import agendar_reunion_cb as _default_agendar_cb
+    from ._resilience import resilient_call, CircuitBreakerProtocol
     from .schedule_validator import _check_slot_availability
     from .time_parser import DIAS_ESPANOL
 except ImportError:
@@ -26,8 +26,8 @@ except ImportError:
     from citas.metrics import track_api_call
     from citas import config as app_config
     from citas.services.http_client import post_with_logging
-    from citas.services.circuit_breaker import agendar_reunion_cb
-    from citas.services._resilience import resilient_call
+    from citas.services.circuit_breaker import agendar_reunion_cb as _default_agendar_cb
+    from citas.services._resilience import resilient_call, CircuitBreakerProtocol
     from citas.services.schedule_validator import _check_slot_availability
     from citas.services.time_parser import DIAS_ESPANOL
 
@@ -46,6 +46,7 @@ class ScheduleRecommender:
         slots: int = 60,
         agendar_usuario: int = 0,
         agendar_sucursal: int = 0,
+        agendar_cb: CircuitBreakerProtocol | None = None,
     ):
         self.id_empresa = id_empresa
         self.duracion_cita = timedelta(minutes=duracion_cita_minutos)
@@ -53,6 +54,7 @@ class ScheduleRecommender:
         self.slots = slots
         self.agendar_usuario = agendar_usuario
         self.agendar_sucursal = agendar_sucursal
+        self._agendar_cb = agendar_cb or _default_agendar_cb
 
     def _format_sugerencia(self, idx: int, sugerencia: dict) -> str | None:
         dia = sugerencia.get("dia", "")
@@ -110,6 +112,7 @@ class ScheduleRecommender:
                     self.slots,
                     self.agendar_usuario,
                     self.agendar_sucursal,
+                    cb=self._agendar_cb,
                 )
                 if availability.get("available"):
                     return {
@@ -152,7 +155,7 @@ class ScheduleRecommender:
             with track_api_call("sugerir_horarios"):
                 data = await resilient_call(
                     lambda: post_with_logging(app_config.API_AGENDAR_REUNION_URL, payload),
-                    cb=agendar_reunion_cb,
+                    cb=self._agendar_cb,
                     circuit_key=self.id_empresa,
                     service_name="SUGERIR_HORARIOS",
                 )

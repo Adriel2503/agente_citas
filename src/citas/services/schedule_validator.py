@@ -17,16 +17,16 @@ try:
     from ..metrics import track_api_call
     from .. import config as app_config
     from .http_client import post_with_logging
-    from .circuit_breaker import agendar_reunion_cb, informacion_cb
-    from ._resilience import resilient_call
+    from .circuit_breaker import agendar_reunion_cb as _default_agendar_cb, informacion_cb as _default_informacion_cb
+    from ._resilience import resilient_call, CircuitBreakerProtocol
     from .time_parser import parse_time, parse_time_range, is_time_blocked, DAY_FIELD_MAP, DIAS_NOMBRE
 except ImportError:
     from citas.logger import get_logger
     from citas.metrics import track_api_call
     from citas import config as app_config
     from citas.services.http_client import post_with_logging
-    from citas.services.circuit_breaker import agendar_reunion_cb, informacion_cb
-    from citas.services._resilience import resilient_call
+    from citas.services.circuit_breaker import agendar_reunion_cb as _default_agendar_cb, informacion_cb as _default_informacion_cb
+    from citas.services._resilience import resilient_call, CircuitBreakerProtocol
     from citas.services.time_parser import parse_time, parse_time_range, is_time_blocked, DAY_FIELD_MAP, DIAS_NOMBRE
 
 logger = get_logger(__name__)
@@ -43,6 +43,7 @@ async def _check_slot_availability(
     agendar_usuario: int,
     agendar_sucursal: int,
     log_api: bool = False,
+    cb: CircuitBreakerProtocol | None = None,
 ) -> dict[str, Any]:
     """
     Consulta CONSULTAR_DISPONIBILIDAD en ws_agendar_reunion.php.
@@ -50,6 +51,7 @@ async def _check_slot_availability(
     Compartida por ScheduleValidator (validate) y ScheduleRecommender (recommendation).
     Retorna graceful degradation (available=True) ante cualquier error de red/CB.
     """
+    _cb = cb or _default_agendar_cb
     try:
         fecha = datetime.strptime(fecha_str, "%Y-%m-%d")
         hora = parse_time(hora_str)
@@ -82,7 +84,7 @@ async def _check_slot_availability(
         with track_api_call("consultar_disponibilidad"):
             data = await resilient_call(
                 lambda: post_with_logging(app_config.API_AGENDAR_REUNION_URL, payload),
-                cb=agendar_reunion_cb,
+                cb=_cb,
                 circuit_key=id_empresa,
                 service_name="CONSULTAR_DISPONIBILIDAD",
             )
@@ -127,6 +129,8 @@ class ScheduleValidator:
         agendar_usuario: int = 0,
         agendar_sucursal: int = 0,
         log_create_booking_apis: bool = False,
+        informacion_cb: CircuitBreakerProtocol | None = None,
+        agendar_cb: CircuitBreakerProtocol | None = None,
     ):
         self.id_empresa = id_empresa
         self.duracion_cita = timedelta(minutes=duracion_cita_minutos)
@@ -134,16 +138,18 @@ class ScheduleValidator:
         self.agendar_usuario = agendar_usuario
         self.agendar_sucursal = agendar_sucursal
         self.log_create_booking_apis = log_create_booking_apis
+        self._informacion_cb = informacion_cb or _default_informacion_cb
+        self._agendar_cb = agendar_cb or _default_agendar_cb
 
     async def _fetch_horario(self) -> dict | None:
         """Obtiene el horario directo desde la API (sin cache)."""
-        if informacion_cb.is_open(self.id_empresa):
+        if self._informacion_cb.is_open(self.id_empresa):
             return None
         payload = {"codOpe": "OBTENER_HORARIO_REUNIONES", "id_empresa": self.id_empresa}
         try:
             data = await resilient_call(
                 lambda: post_with_logging(app_config.API_INFORMACION_URL, payload),
-                cb=informacion_cb,
+                cb=self._informacion_cb,
                 circuit_key=self.id_empresa,
                 service_name="SCHEDULE_VALIDATOR",
             )
@@ -241,6 +247,7 @@ class ScheduleValidator:
             self.id_empresa, fecha_str, hora_str, self.duracion_cita,
             self.slots, self.agendar_usuario, self.agendar_sucursal,
             self.log_create_booking_apis,
+            cb=self._agendar_cb,
         )
         if not availability["available"]:
             return {"valid": False, "error": availability["error"]}
