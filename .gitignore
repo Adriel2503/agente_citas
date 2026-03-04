@@ -12,6 +12,7 @@ build/
 dist/
 *.egg-info/
 .claude 
+.agents
 # Environment
 .env
 .env.local
@@ -40,3 +41,4 @@ htmlcov/
 
 # Temporary files
 tmpclaude-*-cwd
+skills-locked.json
