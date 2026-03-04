@@ -112,13 +112,10 @@ class ScheduleValidator:
         if not range_str:
             return None
 
-        # Separar por guión
+        # Normalizar: quitar espacios y separar por "-"
         parts = range_str.replace(" ", "").split("-")
         if len(parts) != 2:
-            # Intentar con " - " con espacios
-            parts = range_str.split(" - ")
-            if len(parts) != 2:
-                return None
+            return None
 
         start = self._parse_time(parts[0].strip())
         end = self._parse_time(parts[1].strip())
@@ -293,8 +290,7 @@ class ScheduleValidator:
         dia_semana = fecha.weekday()  # 0=Lunes, 6=Domingo
         campo_dia = DAY_MAPPING.get(dia_semana)
         horario_dia = schedule.get(campo_dia)
-        dias_semana = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
-        nombre_dia = dias_semana[dia_semana]
+        nombre_dia = _DIAS_NOMBRE[dia_semana]
 
         if not horario_dia:
             return {"valid": False, "error": f"No hay horario disponible para el día {nombre_dia}. Por favor elige otro día."}
@@ -342,6 +338,30 @@ class ScheduleValidator:
 
         logger.debug("[VALIDATION] Horario válido: %s %s", fecha_str, hora_str)
         return {"valid": True, "error": None}
+
+    def _format_sugerencia(self, idx: int, sugerencia: dict) -> str | None:
+        dia = sugerencia.get("dia", "")
+        hora_legible = sugerencia.get("hora_legible", "")
+        if not dia or not hora_legible:
+            return None
+        disponible = sugerencia.get("disponible", True)
+        fecha_inicio = sugerencia.get("fecha_inicio", "")
+        if dia == "hoy":
+            texto = f"Hoy a las {hora_legible}"
+        elif dia == "mañana":
+            texto = f"Mañana a las {hora_legible}"
+        elif fecha_inicio:
+            try:
+                fecha_obj = datetime.strptime(fecha_inicio, "%Y-%m-%d %H:%M:%S")
+                dia_nombre = DIAS_ESPANOL.get(fecha_obj.strftime("%A"), fecha_obj.strftime("%A"))
+                texto = f"{dia_nombre} {fecha_obj.strftime('%d/%m')} a las {hora_legible}"
+            except ValueError:
+                texto = f"{dia} a las {hora_legible}"
+        else:
+            texto = f"{dia} a las {hora_legible}"
+        if not disponible:
+            texto += " (ocupado)"
+        return f"{idx}. {texto}"
 
     async def recommendation(
         self,
@@ -418,28 +438,9 @@ class ScheduleValidator:
                 if sugerencias and total > 0:
                     sugerencias_texto = []
                     for i, sugerencia in enumerate(sugerencias, 1):
-                        dia = sugerencia.get("dia", "")
-                        hora_legible = sugerencia.get("hora_legible", "")
-                        disponible = sugerencia.get("disponible", True)
-                        fecha_inicio = sugerencia.get("fecha_inicio", "")
-                        if dia and hora_legible:
-                            if dia == "hoy":
-                                texto = f"Hoy a las {hora_legible}"
-                            elif dia == "mañana":
-                                texto = f"Mañana a las {hora_legible}"
-                            elif fecha_inicio:
-                                try:
-                                    fecha_obj = datetime.strptime(fecha_inicio, "%Y-%m-%d %H:%M:%S")
-                                    dia_ingles = fecha_obj.strftime("%A")
-                                    dia_nombre = DIAS_ESPANOL.get(dia_ingles, dia_ingles)
-                                    texto = f"{dia_nombre} {fecha_obj.strftime('%d/%m')} a las {hora_legible}"
-                                except ValueError:
-                                    texto = f"{dia} a las {hora_legible}"
-                            else:
-                                texto = f"{dia} a las {hora_legible}"
-                            if not disponible:
-                                texto += " (ocupado)"
-                            sugerencias_texto.append(f"{i}. {texto}")
+                        texto = self._format_sugerencia(i, sugerencia)
+                        if texto:
+                            sugerencias_texto.append(texto)
                     if sugerencias_texto:
                         texto_final = f"{mensaje}\n\n" + "\n".join(sugerencias_texto) if mensaje else "Horarios sugeridos:\n\n" + "\n".join(sugerencias_texto)
                         return {
