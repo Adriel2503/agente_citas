@@ -16,11 +16,9 @@ Uso:
     # Lanza RuntimeError si circuit abierto, o la excepción original si la llamada falla.
 """
 
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Protocol
 
 import httpx
-
-from .circuit_breaker import CircuitBreaker
 
 try:
     from ..logger import get_logger
@@ -30,9 +28,16 @@ except ImportError:
 logger = get_logger(__name__)
 
 
+class CircuitBreakerProtocol(Protocol):
+    """Interfaz mínima que debe satisfacer cualquier circuit breaker."""
+    def is_open(self, key: Any) -> bool: ...
+    def record_failure(self, key: Any) -> None: ...
+    def record_success(self, key: Any) -> None: ...
+
+
 async def resilient_call(
     coro_factory: Callable[[], Awaitable[Any]],
-    cb: CircuitBreaker,
+    cb: CircuitBreakerProtocol,
     circuit_key: Any,
     service_name: str,
 ) -> Any:
@@ -80,4 +85,4 @@ async def resilient_call(
         raise
 
 
-__all__ = ["resilient_call"]
+__all__ = ["resilient_call", "CircuitBreakerProtocol"]
