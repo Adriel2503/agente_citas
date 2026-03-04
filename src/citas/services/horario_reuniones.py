@@ -1,17 +1,24 @@
 """
-Horario de reuniones: fetch desde API MaravIA y formateo para system prompt.
-Usa OBTENER_HORARIO_REUNIONES (ws_informacion_ia.php) a través de horario_cache.
+Horario de reuniones: fetch directo desde API MaravIA y formateo para system prompt.
+Usa OBTENER_HORARIO_REUNIONES (ws_informacion_ia.php).
+El agent cache (60 min) protege esta llamada — se ejecuta una vez por empresa cada 60 min.
 """
 
 from typing import Any
 
 try:
+    from .. import config as app_config
     from ..logger import get_logger
-    from .horario_cache import get_horario
+    from .http_client import post_with_logging
+    from .circuit_breaker import informacion_cb
+    from ._resilience import resilient_call
     from .time_parser import DIAS_ORDEN
 except ImportError:
+    from citas import config as app_config
     from citas.logger import get_logger
-    from citas.services.horario_cache import get_horario
+    from citas.services.http_client import post_with_logging
+    from citas.services.circuit_breaker import informacion_cb
+    from citas.services._resilience import resilient_call
     from citas.services.time_parser import DIAS_ORDEN
 
 logger = get_logger(__name__)
@@ -48,26 +55,42 @@ def format_horario_for_system_prompt(horario_reuniones: dict[str, Any]) -> str:
 
 async def fetch_horario_reuniones(id_empresa: Any | None) -> str:
     """
-    Obtiene el horario de reuniones desde la cache/API y lo devuelve formateado
+    Obtiene el horario de reuniones desde la API y lo devuelve formateado
     para el system prompt.
 
+    Llama directo a la API sin cache propio — el agent cache (60 min) ya
+    garantiza que esta función se ejecuta una sola vez por empresa cada 60 min.
+
     Args:
-        id_empresa: ID de la empresa (int o str). Si es None, retorna mensaje por defecto.
+        id_empresa: ID de la empresa. Si es None, retorna mensaje por defecto.
 
     Returns:
         String formateado para el prompt o "No hay horario cargado." si falla.
     """
-    if id_empresa is None or id_empresa == "":
+    if not id_empresa:
         return "No hay horario cargado."
 
-    logger.debug("[HORARIO] Obteniendo horario para id_empresa=%s", id_empresa)
-    horario = await get_horario(id_empresa)
-    if not horario:
-        logger.info("[HORARIO] Sin horario para id_empresa=%s", id_empresa)
+    if informacion_cb.is_open(id_empresa):
         return "No hay horario cargado."
 
-    logger.info("[HORARIO] Horario cargado para id_empresa=%s", id_empresa)
-    return format_horario_for_system_prompt(horario)
+    payload = {"codOpe": "OBTENER_HORARIO_REUNIONES", "id_empresa": id_empresa}
+    logger.debug("[HORARIO] Fetching id_empresa=%s", id_empresa)
+
+    try:
+        data = await resilient_call(
+            lambda: post_with_logging(app_config.API_INFORMACION_URL, payload),
+            cb=informacion_cb,
+            circuit_key=id_empresa,
+            service_name="HORARIO_REUNIONES",
+        )
+        if data.get("success") and data.get("horario_reuniones"):
+            logger.info("[HORARIO] Horario cargado id_empresa=%s", id_empresa)
+            return format_horario_for_system_prompt(data["horario_reuniones"])
+        logger.info("[HORARIO] Sin horario id_empresa=%s", id_empresa)
+    except Exception as e:
+        logger.info("[HORARIO] No se pudo obtener id_empresa=%s: %s", id_empresa, e)
+
+    return "No hay horario cargado."
 
 
 __all__ = ["fetch_horario_reuniones", "format_horario_for_system_prompt"]

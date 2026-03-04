@@ -112,7 +112,7 @@ def get_health_issues() -> list[str]:
 # ---------------------------------------------------------------------------
 
 # Keyed by id_empresa.
-# Compartido por: horario_cache, contexto_negocio, productos_servicios_citas, busqueda_productos
+# Compartido por: horario_reuniones, contexto_negocio, productos_servicios_citas, busqueda_productos, schedule_validator
 informacion_cb: CircuitBreaker = _register(CircuitBreaker(
     name="ws_informacion_ia",
     threshold=app_config.CB_THRESHOLD,

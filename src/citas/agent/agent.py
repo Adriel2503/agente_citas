@@ -59,7 +59,7 @@ _SESSION_LOCKS_CLEANUP_THRESHOLD = 500  # multiempresa: muchas sesiones; limpiez
 # Cache de agentes compilados: clave = id_empresa.
 # TTL independiente del cache de horarios: el system prompt (contexto negocio, FAQs,
 # productos) cambia raramente → TTL largo (default 60 min).
-# La validación de horario usa horario_cache directamente, siempre fresca.
+# La validación de horario llama directo a la API (sin cache propio).
 _agent_cache: TTLCache = TTLCache(
     maxsize=app_config.AGENT_CACHE_MAXSIZE,
     ttl=app_config.AGENT_CACHE_TTL_MINUTES * 60,
@@ -228,7 +228,7 @@ async def _get_agent(config: dict[str, Any]):
     Utiliza TTLCache para evitar recrear el cliente OpenAI, las HTTP calls
     del prompt y la compilación del grafo LangGraph en cada mensaje. El TTL
     se gobierna con AGENT_CACHE_TTL_MINUTES (default 60 min), independiente
-    del cache de horarios (SCHEDULE_CACHE_TTL_MINUTES).
+    independiente del horario de reuniones (sin cache propio).
 
     Incluye doble verificación con asyncio.Lock por cache_key para serializar
     la primera creación cuando múltiples sesiones de la misma empresa llegan

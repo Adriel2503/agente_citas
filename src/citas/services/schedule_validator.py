@@ -14,8 +14,7 @@ try:
     from ..metrics import track_api_call
     from .. import config as app_config
     from .http_client import post_with_logging
-    from .horario_cache import get_horario as _default_get_horario
-    from .circuit_breaker import agendar_reunion_cb
+    from .circuit_breaker import agendar_reunion_cb, informacion_cb
     from ._resilience import resilient_call
     from .time_parser import parse_time, parse_time_range, is_time_blocked, DAY_FIELD_MAP, DIAS_ESPANOL, DIAS_NOMBRE
 except ImportError:
@@ -23,8 +22,7 @@ except ImportError:
     from citas.metrics import track_api_call
     from citas import config as app_config
     from citas.services.http_client import post_with_logging
-    from citas.services.horario_cache import get_horario as _default_get_horario
-    from citas.services.circuit_breaker import agendar_reunion_cb
+    from citas.services.circuit_breaker import agendar_reunion_cb, informacion_cb
     from citas.services._resilience import resilient_call
     from citas.services.time_parser import parse_time, parse_time_range, is_time_blocked, DAY_FIELD_MAP, DIAS_ESPANOL, DIAS_NOMBRE
 
@@ -47,7 +45,6 @@ class ScheduleValidator:
         agendar_usuario: int = 0,
         agendar_sucursal: int = 0,
         log_create_booking_apis: bool = False,
-        horario_fetcher=None,
     ):
         self.id_empresa = id_empresa
         self.duracion_cita = timedelta(minutes=duracion_cita_minutos)
@@ -57,7 +54,24 @@ class ScheduleValidator:
         self.agendar_usuario = agendar_usuario
         self.agendar_sucursal = agendar_sucursal
         self.log_create_booking_apis = log_create_booking_apis
-        self._get_horario = horario_fetcher or _default_get_horario
+
+    async def _fetch_horario(self) -> dict | None:
+        """Obtiene el horario directo desde la API (sin cache)."""
+        if informacion_cb.is_open(self.id_empresa):
+            return None
+        payload = {"codOpe": "OBTENER_HORARIO_REUNIONES", "id_empresa": self.id_empresa}
+        try:
+            data = await resilient_call(
+                lambda: post_with_logging(app_config.API_INFORMACION_URL, payload),
+                cb=informacion_cb,
+                circuit_key=self.id_empresa,
+                service_name="SCHEDULE_VALIDATOR",
+            )
+            if data.get("success") and data.get("horario_reuniones"):
+                return data["horario_reuniones"]
+        except Exception:
+            pass
+        return None
 
     async def _check_availability(self, fecha_str: str, hora_str: str) -> dict[str, Any]:
         """
@@ -167,8 +181,8 @@ class ScheduleValidator:
         if fecha_hora_cita <= ahora:
             return {"valid": False, "error": "La fecha y hora seleccionada ya pasó. Por favor elige una fecha y hora futura."}
 
-        # 5. Obtener horario de reuniones (cache compartida con horario_reuniones)
-        schedule = await self._get_horario(self.id_empresa)
+        # 5. Obtener horario de reuniones
+        schedule = await self._fetch_horario()
         if not schedule:
             logger.warning("[SCHEDULE] No se pudo obtener horario, permitiendo cita")
             return {"valid": True, "error": None}

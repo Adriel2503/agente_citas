@@ -134,9 +134,6 @@ CB_RESET_TTL: int = _get_int("CB_RESET_TTL", 300, min_val=60, max_val=3600)
 # Cache
 # ---------------------------------------------------------------------------
 
-SCHEDULE_CACHE_TTL_MINUTES: int = _get_int(
-    "SCHEDULE_CACHE_TTL_MINUTES", 5, min_val=1, max_val=1440
-)
 MAX_MESSAGES_HISTORY: int = _get_int(
     "MAX_MESSAGES_HISTORY", 20, min_val=4, max_val=200
 )
