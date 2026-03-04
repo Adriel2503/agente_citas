@@ -6,116 +6,30 @@ Responsabilidad única: validate() — responde "¿es válido este slot?"
 Para sugerencias de horarios disponibles, ver schedule_recommender.py.
 """
 
-import json
-import httpx
 from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
 try:
     from ..logger import get_logger
-    from ..metrics import track_api_call
     from .. import config as app_config
     from .http_client import post_with_logging
     from .circuit_breaker import agendar_reunion_cb as _default_agendar_cb, informacion_cb as _default_informacion_cb
     from ._resilience import resilient_call, CircuitBreakerProtocol
     from .time_parser import parse_time, parse_time_range, is_time_blocked, DAY_FIELD_MAP, DIAS_NOMBRE
+    from .availability_client import check_slot_availability
 except ImportError:
     from citas.logger import get_logger
-    from citas.metrics import track_api_call
     from citas import config as app_config
     from citas.services.http_client import post_with_logging
     from citas.services.circuit_breaker import agendar_reunion_cb as _default_agendar_cb, informacion_cb as _default_informacion_cb
     from citas.services._resilience import resilient_call, CircuitBreakerProtocol
     from citas.services.time_parser import parse_time, parse_time_range, is_time_blocked, DAY_FIELD_MAP, DIAS_NOMBRE
+    from citas.services.availability_client import check_slot_availability
 
 logger = get_logger(__name__)
 
 _ZONA_PERU = ZoneInfo(app_config.TIMEZONE)
-
-
-async def _check_slot_availability(
-    id_empresa: Any,
-    fecha_str: str,
-    hora_str: str,
-    duracion_cita: timedelta,
-    slots: int,
-    agendar_usuario: int,
-    agendar_sucursal: int,
-    log_api: bool = False,
-    cb: CircuitBreakerProtocol | None = None,
-) -> dict[str, Any]:
-    """
-    Consulta CONSULTAR_DISPONIBILIDAD en ws_agendar_reunion.php.
-
-    Compartida por ScheduleValidator (validate) y ScheduleRecommender (recommendation).
-    Retorna graceful degradation (available=True) ante cualquier error de red/CB.
-    """
-    _cb = cb or _default_agendar_cb
-    try:
-        fecha = datetime.strptime(fecha_str, "%Y-%m-%d")
-        hora = parse_time(hora_str)
-        if not hora:
-            return {"available": True, "error": None}
-
-        fecha_hora_inicio = fecha.replace(hour=hora.hour, minute=hora.minute)
-        fecha_hora_fin = fecha_hora_inicio + duracion_cita
-
-        payload = {
-            "codOpe": "CONSULTAR_DISPONIBILIDAD",
-            "id_empresa": id_empresa,
-            "fecha_inicio": fecha_hora_inicio.strftime("%Y-%m-%d %H:%M:%S"),
-            "fecha_fin": fecha_hora_fin.strftime("%Y-%m-%d %H:%M:%S"),
-            "slots": slots,
-            "agendar_usuario": agendar_usuario,
-            "agendar_sucursal": agendar_sucursal,
-        }
-
-        if log_api:
-            logger.info("[create_booking] API 2: ws_agendar_reunion.php - CONSULTAR_DISPONIBILIDAD")
-            logger.info("  URL: %s", app_config.API_AGENDAR_REUNION_URL)
-            logger.info("  Enviado: %s", json.dumps(payload, ensure_ascii=False))
-        logger.debug("[AVAILABILITY] Consultando: %s %s", fecha_str, hora_str)
-        logger.debug(
-            "[AVAILABILITY] JSON enviado a ws_agendar_reunion.php (CONSULTAR_DISPONIBILIDAD): %s",
-            json.dumps(payload, ensure_ascii=False, indent=2),
-        )
-
-        with track_api_call("consultar_disponibilidad"):
-            data = await resilient_call(
-                lambda: post_with_logging(app_config.API_AGENDAR_REUNION_URL, payload),
-                cb=_cb,
-                circuit_key=id_empresa,
-                service_name="CONSULTAR_DISPONIBILIDAD",
-            )
-
-        if log_api:
-            logger.info("  Respuesta: %s", json.dumps(data, ensure_ascii=False))
-        logger.debug("[AVAILABILITY] Disponible: %s", data.get("disponible"))
-
-        if not data.get("success"):
-            logger.warning("[AVAILABILITY] Respuesta sin éxito: %s", data)
-            return {"available": True, "error": None}  # Graceful degradation
-
-        if data.get("disponible"):
-            return {"available": True, "error": None}
-        return {
-            "available": False,
-            "error": "El horario seleccionado ya está ocupado. Por favor elige otra hora o fecha.",
-        }
-
-    except RuntimeError:
-        logger.warning("[AVAILABILITY] Circuit abierto para ws_agendar_reunion")
-        return {"available": True, "error": None}
-    except httpx.TimeoutException:
-        logger.warning("[AVAILABILITY] Timeout - graceful degradation")
-        return {"available": True, "error": None}
-    except httpx.HTTPError as e:
-        logger.warning("[AVAILABILITY] Error HTTP: %s - graceful degradation", e)
-        return {"available": True, "error": None}
-    except Exception as e:
-        logger.warning("[AVAILABILITY] Error inesperado: %s - graceful degradation", e)
-        return {"available": True, "error": None}
 
 
 class ScheduleValidator:
@@ -243,7 +157,7 @@ class ScheduleValidator:
             return {"valid": False, "error": "El horario seleccionado está bloqueado. Por favor elige otra hora."}
 
         # 12. Verificar disponibilidad contra citas existentes
-        availability = await _check_slot_availability(
+        availability = await check_slot_availability(
             self.id_empresa, fecha_str, hora_str, self.duracion_cita,
             self.slots, self.agendar_usuario, self.agendar_sucursal,
             self.log_create_booking_apis,
@@ -256,4 +170,4 @@ class ScheduleValidator:
         return {"valid": True, "error": None}
 
 
-__all__ = ["ScheduleValidator", "_check_slot_availability"]
+__all__ = ["ScheduleValidator"]

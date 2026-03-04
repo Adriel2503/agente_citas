@@ -19,7 +19,7 @@ try:
     from .http_client import post_with_logging
     from .circuit_breaker import agendar_reunion_cb as _default_agendar_cb
     from ._resilience import resilient_call, CircuitBreakerProtocol
-    from .schedule_validator import _check_slot_availability
+    from .availability_client import check_slot_availability
     from .time_parser import DIAS_ESPANOL
 except ImportError:
     from citas.logger import get_logger
@@ -28,7 +28,7 @@ except ImportError:
     from citas.services.http_client import post_with_logging
     from citas.services.circuit_breaker import agendar_reunion_cb as _default_agendar_cb
     from citas.services._resilience import resilient_call, CircuitBreakerProtocol
-    from citas.services.schedule_validator import _check_slot_availability
+    from citas.services.availability_client import check_slot_availability
     from citas.services.time_parser import DIAS_ESPANOL
 
 logger = get_logger(__name__)
@@ -104,7 +104,7 @@ class ScheduleRecommender:
         # Si el cliente indicó fecha Y hora concretas, consultar disponibilidad exacta primero
         if fecha_solicitada and hora_solicitada and hora_solicitada.strip():
             try:
-                availability = await _check_slot_availability(
+                availability = await check_slot_availability(
                     self.id_empresa,
                     fecha_solicitada.strip(),
                     hora_solicitada.strip(),
