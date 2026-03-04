@@ -5,7 +5,6 @@ correo_cliente, correo_usuario, agendar_usuario.
 """
 
 import json
-from datetime import datetime, timedelta
 
 import httpx
 from typing import Any
@@ -16,31 +15,17 @@ try:
     from .. import config as app_config
     from .http_client import get_client
     from .circuit_breaker import calendario_cb
-    from .time_parser import parse_time
+    from .time_parser import build_fecha_inicio_fin
 except ImportError:
     from citas.logger import get_logger
     from citas.metrics import track_api_call, record_booking_attempt, record_booking_success, record_booking_failure
     from citas import config as app_config
     from citas.services.http_client import get_client
     from citas.services.circuit_breaker import calendario_cb
-    from citas.services.time_parser import parse_time
+    from citas.services.time_parser import build_fecha_inicio_fin
 
 logger = get_logger(__name__)
 
-
-def _build_fecha_inicio_fin(fecha: str, hora: str, duracion_minutos: int) -> tuple:
-    """Construye fecha_inicio y fecha_fin en formato YYYY-MM-DD HH:MM:SS."""
-    hora_dt = parse_time(hora)
-    if not hora_dt:
-        raise ValueError(f"Hora no válida (esperado HH:MM AM/PM): {hora}")
-    fecha_inicio = f"{fecha} {hora_dt.strftime('%H:%M:%S')}"
-    try:
-        dt_start = datetime.strptime(fecha_inicio, "%Y-%m-%d %H:%M:%S")
-    except ValueError:
-        raise ValueError(f"Fecha/hora no válidos: {fecha} {hora}")
-    dt_end = dt_start + timedelta(minutes=duracion_minutos)
-    fecha_fin = dt_end.strftime("%Y-%m-%d %H:%M:%S")
-    return fecha_inicio, fecha_fin
 
 
 async def confirm_booking(
@@ -75,7 +60,7 @@ async def confirm_booking(
     record_booking_attempt()
 
     try:
-        fecha_inicio, fecha_fin = _build_fecha_inicio_fin(fecha, hora, duracion_cita_minutos)
+        fecha_inicio, fecha_fin = build_fecha_inicio_fin(fecha, hora, duracion_cita_minutos)
     except ValueError as e:
         logger.warning("[BOOKING] Fecha/hora inválidos: %s", e)
         record_booking_failure("invalid_datetime")

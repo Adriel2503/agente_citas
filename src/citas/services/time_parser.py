@@ -4,7 +4,14 @@ Testeables de forma aislada.
 """
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
+
+try:
+    from ..logger import get_logger
+except ImportError:
+    from citas.logger import get_logger
+
+logger = get_logger(__name__)
 
 # Mapeo int(weekday) → campo BD. Compartido por schedule_validator y horario_reuniones.
 DAY_FIELD_MAP: dict[int, str] = {
@@ -27,6 +34,47 @@ DIAS_ORDEN: list[tuple[str, str]] = [
     ("Sábado",    "reunion_sabado"),
     ("Domingo",   "reunion_domingo"),
 ]
+
+# Mapeo día de semana en inglés → nombre en español. Usado por schedule_validator.
+DIAS_ESPANOL: dict[str, str] = {
+    "Monday": "Lunes",
+    "Tuesday": "Martes",
+    "Wednesday": "Miércoles",
+    "Thursday": "Jueves",
+    "Friday": "Viernes",
+    "Saturday": "Sábado",
+    "Sunday": "Domingo",
+}
+
+# Lista de días en español (índice 0=lunes, 6=domingo). Usado por schedule_validator.
+DIAS_NOMBRE: list[str] = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+
+
+def build_fecha_inicio_fin(fecha: str, hora: str, duracion_minutos: int) -> tuple[str, str]:
+    """
+    Construye fecha_inicio y fecha_fin en formato YYYY-MM-DD HH:MM:SS.
+
+    Args:
+        fecha: Fecha en formato YYYY-MM-DD
+        hora: Hora en formato HH:MM AM/PM
+        duracion_minutos: Duración de la cita en minutos
+
+    Returns:
+        Tupla (fecha_inicio, fecha_fin) como strings YYYY-MM-DD HH:MM:SS
+
+    Raises:
+        ValueError: si la hora o la fecha/hora no tienen el formato esperado
+    """
+    hora_dt = parse_time(hora)
+    if not hora_dt:
+        raise ValueError(f"Hora no válida (esperado HH:MM AM/PM): {hora}")
+    fecha_inicio = f"{fecha} {hora_dt.strftime('%H:%M:%S')}"
+    try:
+        dt_start = datetime.strptime(fecha_inicio, "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        raise ValueError(f"Fecha/hora no válidos: {fecha} {hora}")
+    dt_end = dt_start + timedelta(minutes=duracion_minutos)
+    return fecha_inicio, dt_end.strftime("%Y-%m-%d %H:%M:%S")
 
 
 def parse_time(time_str: str) -> datetime | None:
@@ -59,7 +107,6 @@ def is_time_blocked(
     fecha: datetime,
     hora: datetime,
     horarios_bloqueados: str,
-    logger=None,
 ) -> bool:
     """
     Verifica si la hora está en los horarios bloqueados.
@@ -68,7 +115,6 @@ def is_time_blocked(
         fecha: Fecha de la cita
         hora: Hora de la cita
         horarios_bloqueados: String JSON o CSV con horarios bloqueados
-        logger: Logger opcional para warnings
 
     Returns:
         True si está bloqueado, False en caso contrario
@@ -90,8 +136,7 @@ def is_time_blocked(
                     inicio = parse_time(bloqueo.get("inicio", ""))
                     fin = parse_time(bloqueo.get("fin", ""))
                     if inicio and fin and inicio.time() <= hora.time() < fin.time():
-                        if logger:
-                            logger.debug("[BLOCKED] Hora %s está bloqueada", hora.time())
+                        logger.debug("[BLOCKED] Hora %s está bloqueada", hora.time())
                         return True
             elif isinstance(bloqueo, str):
                 if fecha_str in bloqueo:
@@ -99,15 +144,22 @@ def is_time_blocked(
                     if rango:
                         inicio, fin = rango
                         if inicio.time() <= hora.time() < fin.time():
-                            if logger:
-                                logger.debug("[BLOCKED] Hora %s está bloqueada", hora.time())
+                            logger.debug("[BLOCKED] Hora %s está bloqueada", hora.time())
                             return True
 
     except Exception as e:
-        if logger:
-            logger.warning("[SCHEDULE] Error parseando horarios bloqueados: %s", e)
+        logger.warning("[SCHEDULE] Error parseando horarios bloqueados: %s", e)
 
     return False
 
 
-__all__ = ["parse_time", "parse_time_range", "is_time_blocked", "DAY_FIELD_MAP", "DIAS_ORDEN"]
+__all__ = [
+    "parse_time",
+    "parse_time_range",
+    "is_time_blocked",
+    "build_fecha_inicio_fin",
+    "DAY_FIELD_MAP",
+    "DIAS_ORDEN",
+    "DIAS_ESPANOL",
+    "DIAS_NOMBRE",
+]

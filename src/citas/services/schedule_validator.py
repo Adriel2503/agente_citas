@@ -17,7 +17,7 @@ try:
     from .horario_cache import get_horario as _default_get_horario
     from .circuit_breaker import agendar_reunion_cb
     from ._resilience import resilient_call
-    from .time_parser import parse_time, parse_time_range, is_time_blocked, DAY_FIELD_MAP
+    from .time_parser import parse_time, parse_time_range, is_time_blocked, DAY_FIELD_MAP, DIAS_ESPANOL, DIAS_NOMBRE
 except ImportError:
     from citas.logger import get_logger
     from citas.metrics import track_api_call
@@ -26,22 +26,10 @@ except ImportError:
     from citas.services.horario_cache import get_horario as _default_get_horario
     from citas.services.circuit_breaker import agendar_reunion_cb
     from citas.services._resilience import resilient_call
-    from citas.services.time_parser import parse_time, parse_time_range, is_time_blocked, DAY_FIELD_MAP
+    from citas.services.time_parser import parse_time, parse_time_range, is_time_blocked, DAY_FIELD_MAP, DIAS_ESPANOL, DIAS_NOMBRE
 
 logger = get_logger(__name__)
 
-# Días en español para formateo de sugerencias
-DIAS_ESPANOL = {
-    "Monday": "Lunes",
-    "Tuesday": "Martes",
-    "Wednesday": "Miércoles",
-    "Thursday": "Jueves",
-    "Friday": "Viernes",
-    "Saturday": "Sábado",
-    "Sunday": "Domingo"
-}
-
-_DIAS_NOMBRE = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
 _ZONA_PERU = ZoneInfo(app_config.TIMEZONE)
 
 
@@ -189,7 +177,7 @@ class ScheduleValidator:
         dia_semana = fecha.weekday()  # 0=Lunes, 6=Domingo
         campo_dia = DAY_FIELD_MAP.get(dia_semana)
         horario_dia = schedule.get(campo_dia)
-        nombre_dia = _DIAS_NOMBRE[dia_semana]
+        nombre_dia = DIAS_NOMBRE[dia_semana]
 
         if not horario_dia:
             return {"valid": False, "error": f"No hay horario disponible para el día {nombre_dia}. Por favor elige otro día."}
@@ -227,7 +215,7 @@ class ScheduleValidator:
 
         # 11. Validar horarios bloqueados
         horarios_bloqueados = schedule.get("horarios_bloqueados", "")
-        if is_time_blocked(fecha, hora, horarios_bloqueados, logger=logger):
+        if is_time_blocked(fecha, hora, horarios_bloqueados):
             return {"valid": False, "error": "El horario seleccionado está bloqueado. Por favor elige otra hora."}
 
         # 12. Verificar disponibilidad contra citas existentes
