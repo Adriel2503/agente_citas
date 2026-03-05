@@ -267,7 +267,6 @@ async def _get_agent(config: dict[str, Any]):
             # Construir system prompt usando template Jinja2 (async: carga horario y productos en paralelo)
             system_prompt = await build_citas_system_prompt(
                 config=config,
-                history=None,
             )
 
             # Crear agente con API moderna (response_format: reply + url opcional)

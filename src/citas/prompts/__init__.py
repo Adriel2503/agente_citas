@@ -63,17 +63,15 @@ def _apply_defaults(config: dict[str, Any]) -> dict[str, Any]:
 
 async def build_citas_system_prompt(
     config: dict[str, Any],
-    history: list[dict] = None
 ) -> str:
     """
     Construye el system prompt del agente de citas.
 
     Args:
         config: Diccionario con id_empresa (requerido) y resto de configuración del agente (personalidad, nombre, etc.).
-        history: Lista de turnos previos [{"user": "...", "response": "..."}]
 
     Returns:
-        System prompt formateado con historial.
+        System prompt renderizado.
     """
     variables = _apply_defaults(config)
     variables["archivo_saludo"] = (config.get("archivo_saludo") or "").strip()
@@ -124,10 +122,6 @@ async def build_citas_system_prompt(
     variables["lista_productos_servicios"] = format_nombres_para_prompt(nombres_productos, nombres_servicios)
     variables["contexto_negocio"] = contexto_negocio
     variables["preguntas_frecuentes"] = preguntas_frecuentes_str or ""
-
-    # Agregar historial
-    variables["history"] = history or []
-    variables["has_history"] = bool(history)
 
     return _citas_template.render(**variables)
 

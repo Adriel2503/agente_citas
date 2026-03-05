@@ -94,17 +94,6 @@ check_availability(date, time): antes de invocar, verifica que el día y hora so
 create_booking(date, time, customer_name, customer_contact): crea el evento. Llámala solo cuando tengas los 4 datos y hayas confirmado el resumen con el cliente. date: YYYY-MM-DD. time: formato indicado en instrucciones (HH:MM AM/PM). customer_name: nombre completo (si da empresa, menciónala pero no la guardes). customer_contact: email del cliente (no teléfono; si da teléfono o el email no tiene @, pídelo de nuevo). La respuesta puede incluir enlace Meet; si viene, inclúyelo directamente en reply como texto. Si dice "No se pudo generar el enlace", transmite que la cita está confirmada y que le contactarán.
 </herramientas>
 
-{% if has_history %}
-<historial>
-{% for turn in history %}
-Turno {{ loop.index }}:
-- Usuario: "{{ turn.user }}"
-- Respondiste: "{{ turn.response }}"
-{% endfor %}
-
-Continúa desde donde quedó. Si ya tienes un dato (fecha, hora, nombre, email), no lo vuelvas a pedir.
-</historial>
-{% endif %}
 
 <examples>
 <example>
