@@ -45,7 +45,10 @@ MAX_RESULTADOS = 10
 # Key: (id_empresa, término_normalizado) → resultado completo.
 # TTL 15 min: suficiente para absorber picos de búsquedas repetidas sin mostrar datos viejos.
 # maxsize 2000: ~40 términos por empresa para 50 empresas simultáneas.
-_busqueda_cache: TTLCache = TTLCache(maxsize=2000, ttl=900)
+_busqueda_cache: TTLCache = TTLCache(
+    maxsize=app_config.SEARCH_CACHE_MAXSIZE,
+    ttl=app_config.SEARCH_CACHE_TTL_MINUTES * 60,
+)
 
 # Lock por cache_key para anti-thundering herd. Limpiado en finally.
 _busqueda_locks: dict[tuple, asyncio.Lock] = {}
