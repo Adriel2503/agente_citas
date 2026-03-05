@@ -17,7 +17,7 @@ Estado tras la segunda auditoría técnica (2026-02). Madurez actual: **8.5 / 10
 
 ## 🔴 Críticos (deben resolverse antes de producción)
 
-### C1 — InMemorySaver sin TTL (memory leak)
+### C1 — InMemorySaver sin TTL (memory leak) ⏸️ EN PAUSA
 
 **Problema:** `InMemorySaver` guarda el historial de cada sesión en RAM sin límite de tiempo.
 El `session_id` en WhatsApp es permanente por contacto y nunca cambia → la RAM crece
@@ -25,6 +25,8 @@ indefinidamente mientras el proceso esté vivo. Con 50–200 empresas y múltipl
 activos esto eventualmente agota la memoria del container.
 
 **Solución: migrar a `AsyncRedisSaver` con TTL de 24 horas.**
+
+> ⚠️ **Implementado en commit `ed47eae` y revertido (2026-03-05).** El código fue documentado en `docs/cambios_solid2_c1.md`. Pendiente re-implementar cuando Redis Stack esté confirmado en Easypanel y `REDIS_URL` configurado.
 
 Redis (`memori_agentes` en Easypanel) ya existe. Solo falta configurarlo.
 
@@ -136,7 +138,7 @@ También requiere agregar el header en el gateway Go al hacer la llamada al agen
 
 ## 🟡 Mejoras importantes
 
-### M1 — Límite de ventana de mensajes (20 turnos)
+### ✅ M1 — Límite de ventana de mensajes (20 turnos) — IMPLEMENTADO
 
 **Problema:** Aunque Redis resuelva el TTL, sin un límite de ventana el historial de una
 sesión muy activa puede crecer y consumir tokens en exceso en cada llamada al LLM.
@@ -198,14 +200,13 @@ Requiere cambios en el gateway Go para consumir SSE y retransmitir a N8N/WhatsAp
 ## Resumen de prioridades
 
 ```
-Ahora mismo (sin Redis):
-  ✅ Implementar trim_messages (M1) — 10 min, 1 archivo
+✅ M1 — trim_messages implementado (wrap_model_call en agent.py)
 
 Antes de producción con carga real:
-  ⚠️  Migrar InMemorySaver → AsyncRedisSaver (C1)
-  ⚠️  Auth X-Internal-Token (C2)
+  ⏸️  C1 — AsyncRedisSaver (implementado/revertido, ver cambios_solid2_c1.md)
+  ⚠️  C2 — Auth X-Internal-Token
 
 Después:
   📋 Tests unitarios
-  📋 Streaming SSE
+  📋 Streaming SSE (descartado — canal WhatsApp, respuesta siempre completa)
 ```
