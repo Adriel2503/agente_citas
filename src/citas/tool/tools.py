@@ -29,6 +29,24 @@ except ImportError:
 logger = get_logger(__name__)
 
 
+def _require_context(runtime: ToolRuntime | None, tool_name: str):
+    """
+    Extrae el AgentContext del runtime. No usa fallback id_empresa=1:
+    en multi-tenant filtrar datos entre empresas sería un fallo silencioso grave.
+    Raises:
+        RuntimeError: si runtime o runtime.context no está disponible.
+    """
+    ctx = getattr(runtime, "context", None) if runtime is not None else None
+    if ctx is None:
+        logger.warning(
+            "[TOOL:%s] runtime.context es None — operación rechazada. "
+            "No se usa fallback para evitar filtrado entre empresas.",
+            tool_name,
+        )
+        raise RuntimeError(f"[{tool_name}] AgentContext no disponible")
+    return ctx
+
+
 @tool
 async def check_availability(
     date: str,
@@ -61,20 +79,20 @@ async def check_availability(
         "El 2026-01-31 a las 2:00 PM está disponible. ¿Confirmamos la cita?"
     """
     logger.debug("[TOOL] check_availability - Fecha: %s, Hora: %s", date, time or "no indicada")
-    
-    # Obtener configuración del runtime context
-    ctx = runtime.context if runtime else None
-    id_empresa = ctx.id_empresa if ctx else 1
-    duracion_cita_minutos = ctx.duracion_cita_minutos if ctx else 60
-    slots = ctx.slots if ctx else 60
-    agendar_usuario = ctx.agendar_usuario if ctx else 1
-    agendar_sucursal = ctx.agendar_sucursal if ctx else 0
 
     is_valid, error = validate_date_format(date)
     if not is_valid:
         return error
 
     try:
+        # Obtener configuración del runtime context — falla si no hay contexto
+        ctx = _require_context(runtime, "check_availability")
+        id_empresa = ctx.id_empresa
+        duracion_cita_minutos = ctx.duracion_cita_minutos
+        slots = ctx.slots
+        agendar_usuario = ctx.agendar_usuario
+        agendar_sucursal = ctx.agendar_sucursal
+
         with track_tool_execution("check_availability"):
             recommender = ScheduleRecommender(
                 id_empresa=id_empresa,
@@ -138,22 +156,22 @@ async def create_booking(
     logger.debug("[TOOL] create_booking - %s %s | %s", date, time, customer_name)
     logger.info("[create_booking] Tool en uso: create_booking")
 
-    # Obtener configuración del runtime context
-    ctx = runtime.context if runtime else None
-    id_empresa = ctx.id_empresa if ctx else 1
-    duracion_cita_minutos = ctx.duracion_cita_minutos if ctx else 60
-    slots = ctx.slots if ctx else 60
-    agendar_usuario = ctx.agendar_usuario if ctx else 1  # bandera agendar_usuario para ScheduleValidator
-    agendar_sucursal = ctx.agendar_sucursal if ctx else 0
-    id_prospecto = ctx.id_prospecto if ctx else 0
-    usuario_id = getattr(ctx, "usuario_id", 1) if ctx else 1
-    correo_usuario = getattr(ctx, "correo_usuario", "") or ""
-
     is_valid, error = validate_date_format(date)
     if not is_valid:
         return error
 
     try:
+        # Obtener configuración del runtime context — falla si no hay contexto
+        ctx = _require_context(runtime, "create_booking")
+        id_empresa = ctx.id_empresa
+        duracion_cita_minutos = ctx.duracion_cita_minutos
+        slots = ctx.slots
+        agendar_usuario = ctx.agendar_usuario
+        agendar_sucursal = ctx.agendar_sucursal
+        id_prospecto = ctx.id_prospecto
+        usuario_id = getattr(ctx, "usuario_id", 1)
+        correo_usuario = getattr(ctx, "correo_usuario", "") or ""
+
         with track_tool_execution("create_booking"):
             # 1. VALIDAR datos de entrada
             logger.debug("[TOOL] create_booking - Validando datos de entrada")
@@ -188,7 +206,7 @@ async def create_booking(
 
             # 3. Crear evento en ws_calendario (CREAR_EVENTO)
             logger.debug("[TOOL] create_booking - Creando evento en API")
-            id_prospecto_val = id_prospecto if (id_prospecto and id_prospecto > 0) else (ctx.session_id if ctx else 0)
+            id_prospecto_val = id_prospecto if (id_prospecto and id_prospecto > 0) else ctx.session_id
             booking_result = await confirm_booking(
                 usuario_id=usuario_id,
                 id_prospecto=id_prospecto_val,
@@ -252,14 +270,15 @@ async def search_productos_servicios(
     """
     logger.info("[search_productos_servicios] Tool en uso: search_productos_servicios")
 
-    ctx = runtime.context if runtime else None
-    id_empresa = ctx.id_empresa if ctx else 1
-
-    logger.debug(
-        "[TOOL] search_productos_servicios - id_empresa=%s, busqueda=%s",
-        id_empresa, busqueda,
-    )
     try:
+        # Obtener configuración del runtime context — falla si no hay contexto
+        ctx = _require_context(runtime, "search_productos_servicios")
+        id_empresa = ctx.id_empresa
+
+        logger.debug(
+            "[TOOL] search_productos_servicios - id_empresa=%s, busqueda=%s",
+            id_empresa, busqueda,
+        )
         with track_tool_execution("search_productos_servicios"):
             result = await buscar_productos_servicios(
                 id_empresa=id_empresa,
