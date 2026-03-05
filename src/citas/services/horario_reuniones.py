@@ -10,15 +10,15 @@ try:
     from .. import config as app_config
     from ..logger import get_logger
     from .http_client import post_with_logging
-    from .circuit_breaker import informacion_cb
-    from ._resilience import resilient_call
+    from .circuit_breaker import informacion_cb as _default_informacion_cb
+    from ._resilience import resilient_call, CircuitBreakerProtocol
     from .time_parser import DIAS_ORDEN
 except ImportError:
     from citas import config as app_config
     from citas.logger import get_logger
     from citas.services.http_client import post_with_logging
-    from citas.services.circuit_breaker import informacion_cb
-    from citas.services._resilience import resilient_call
+    from citas.services.circuit_breaker import informacion_cb as _default_informacion_cb
+    from citas.services._resilience import resilient_call, CircuitBreakerProtocol
     from citas.services.time_parser import DIAS_ORDEN
 
 logger = get_logger(__name__)
@@ -53,7 +53,10 @@ def format_horario_for_system_prompt(horario_reuniones: dict[str, Any]) -> str:
     return "\n".join(lineas)
 
 
-async def fetch_horario_reuniones(id_empresa: Any | None) -> str:
+async def fetch_horario_reuniones(
+    id_empresa: Any | None,
+    cb: CircuitBreakerProtocol | None = None,
+) -> str:
     """
     Obtiene el horario de reuniones desde la API y lo devuelve formateado
     para el system prompt.
@@ -70,7 +73,8 @@ async def fetch_horario_reuniones(id_empresa: Any | None) -> str:
     if not id_empresa:
         return "No hay horario cargado."
 
-    if informacion_cb.is_open(id_empresa):
+    _cb = cb or _default_informacion_cb
+    if _cb.is_open(id_empresa):
         return "No hay horario cargado."
 
     payload = {"codOpe": "OBTENER_HORARIO_REUNIONES", "id_empresa": id_empresa}
@@ -79,7 +83,7 @@ async def fetch_horario_reuniones(id_empresa: Any | None) -> str:
     try:
         data = await resilient_call(
             lambda: post_with_logging(app_config.API_INFORMACION_URL, payload),
-            cb=informacion_cb,
+            cb=_cb,
             circuit_key=id_empresa,
             service_name="HORARIO_REUNIONES",
         )

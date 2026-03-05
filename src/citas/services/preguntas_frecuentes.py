@@ -10,14 +10,14 @@ try:
     from .. import config as app_config
     from ..logger import get_logger
     from .http_client import post_with_logging
-    from .circuit_breaker import preguntas_cb
-    from ._resilience import resilient_call
+    from .circuit_breaker import preguntas_cb as _default_preguntas_cb
+    from ._resilience import resilient_call, CircuitBreakerProtocol
 except ImportError:
     from citas import config as app_config
     from citas.logger import get_logger
     from citas.services.http_client import post_with_logging
-    from citas.services.circuit_breaker import preguntas_cb
-    from citas.services._resilience import resilient_call
+    from citas.services.circuit_breaker import preguntas_cb as _default_preguntas_cb
+    from citas.services._resilience import resilient_call, CircuitBreakerProtocol
 
 logger = get_logger(__name__)
 
@@ -49,7 +49,10 @@ def format_preguntas_frecuentes_para_prompt(items: list[dict[str, Any]]) -> str:
     return "\n".join(lineas).strip() if lineas else ""
 
 
-async def fetch_preguntas_frecuentes(id_chatbot: Any | None) -> str:
+async def fetch_preguntas_frecuentes(
+    id_chatbot: Any | None,
+    cb: CircuitBreakerProtocol | None = None,
+) -> str:
     """
     Obtiene las preguntas frecuentes desde la API para inyectar en el system prompt.
     Circuit breaker compartido (preguntas_cb): 3 fallos → abierto 5 min.
@@ -64,7 +67,8 @@ async def fetch_preguntas_frecuentes(id_chatbot: Any | None) -> str:
     if id_chatbot is None or id_chatbot == "":
         return ""
 
-    if preguntas_cb.is_open(id_chatbot):
+    _cb = cb or _default_preguntas_cb
+    if _cb.is_open(id_chatbot):
         return ""
 
     payload = {"id_chatbot": id_chatbot}
@@ -73,7 +77,7 @@ async def fetch_preguntas_frecuentes(id_chatbot: Any | None) -> str:
     try:
         data = await resilient_call(
             lambda: post_with_logging(app_config.API_PREGUNTAS_FRECUENTES_URL, payload),
-            cb=preguntas_cb,
+            cb=_cb,
             circuit_key=id_chatbot,
             service_name="PREGUNTAS_FRECUENTES",
         )

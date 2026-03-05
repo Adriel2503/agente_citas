@@ -11,14 +11,14 @@ try:
     from .. import config as app_config
     from ..logger import get_logger
     from .http_client import post_with_logging
-    from .circuit_breaker import informacion_cb
-    from ._resilience import resilient_call
+    from .circuit_breaker import informacion_cb as _default_informacion_cb
+    from ._resilience import resilient_call, CircuitBreakerProtocol
 except ImportError:
     from citas import config as app_config
     from citas.logger import get_logger
     from citas.services.http_client import post_with_logging
-    from citas.services.circuit_breaker import informacion_cb
-    from citas.services._resilience import resilient_call
+    from citas.services.circuit_breaker import informacion_cb as _default_informacion_cb
+    from citas.services._resilience import resilient_call, CircuitBreakerProtocol
 
 logger = get_logger(__name__)
 
@@ -26,7 +26,7 @@ _MAX_PRODUCTOS = 10
 _MAX_SERVICIOS = 10
 
 
-async def _fetch_nombres(cod_ope: str, id_empresa: Any, max_items: int, response_key: str) -> list[str]:
+async def _fetch_nombres(cod_ope: str, id_empresa: Any, max_items: int, response_key: str, cb: CircuitBreakerProtocol) -> list[str]:
     """
     Obtiene una lista de la API y extrae solo los nombres.
 
@@ -43,7 +43,7 @@ async def _fetch_nombres(cod_ope: str, id_empresa: Any, max_items: int, response
         return []
 
     # Fast reject antes de tocar la red
-    if informacion_cb.is_open(id_empresa):
+    if cb.is_open(id_empresa):
         return []
 
     payload = {
@@ -53,7 +53,7 @@ async def _fetch_nombres(cod_ope: str, id_empresa: Any, max_items: int, response
     try:
         data = await resilient_call(
             lambda: post_with_logging(app_config.API_INFORMACION_URL, payload),
-            cb=informacion_cb,
+            cb=cb,
             circuit_key=id_empresa,
             service_name="PRODUCTOS_SERVICIOS",
         )
@@ -76,7 +76,10 @@ async def _fetch_nombres(cod_ope: str, id_empresa: Any, max_items: int, response
         return []
 
 
-async def fetch_nombres_productos_servicios(id_empresa: Any | None) -> tuple[list[str], list[str]]:
+async def fetch_nombres_productos_servicios(
+    id_empresa: Any | None,
+    cb: CircuitBreakerProtocol | None = None,
+) -> tuple[list[str], list[str]]:
     """
     Obtiene listas de nombres de productos y servicios (máx 10 de cada) en paralelo.
 
@@ -89,9 +92,10 @@ async def fetch_nombres_productos_servicios(id_empresa: Any | None) -> tuple[lis
     if id_empresa is None or id_empresa == "":
         return [], []
 
+    _cb = cb or _default_informacion_cb
     results = await asyncio.gather(
-        _fetch_nombres("OBTENER_PRODUCTOS_CITAS", id_empresa, _MAX_PRODUCTOS, "productos"),
-        _fetch_nombres("OBTENER_SERVICIOS_CITAS", id_empresa, _MAX_SERVICIOS, "servicios"),
+        _fetch_nombres("OBTENER_PRODUCTOS_CITAS", id_empresa, _MAX_PRODUCTOS, "productos", _cb),
+        _fetch_nombres("OBTENER_SERVICIOS_CITAS", id_empresa, _MAX_SERVICIOS, "servicios", _cb),
         return_exceptions=True,
     )
     nombres_productos = results[0] if not isinstance(results[0], Exception) else []
