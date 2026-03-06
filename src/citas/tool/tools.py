@@ -8,6 +8,7 @@ Versión mejorada con logging, métricas, validación y runtime context (LangCha
 
 from typing import Any
 from langchain.tools import tool, ToolRuntime
+from pydantic import ValidationError
 
 try:
     from ..services.schedule_validator import ScheduleValidator
@@ -16,7 +17,7 @@ try:
     from ..services.busqueda_productos import buscar_productos_servicios, format_productos_para_respuesta
     from ..logger import get_logger
     from ..metrics import track_tool_execution
-    from ..validation import validate_booking_data, validate_date_format
+    from ..validation import BookingData, format_validation_error, validate_date_format
 except ImportError:
     from citas.services.schedule_validator import ScheduleValidator
     from citas.services.schedule_recommender import ScheduleRecommender
@@ -24,7 +25,7 @@ except ImportError:
     from citas.services.busqueda_productos import buscar_productos_servicios, format_productos_para_respuesta
     from citas.logger import get_logger
     from citas.metrics import track_tool_execution
-    from citas.validation import validate_booking_data, validate_date_format
+    from citas.validation import BookingData, format_validation_error, validate_date_format
 
 logger = get_logger(__name__)
 
@@ -173,16 +174,17 @@ async def create_booking(
         correo_usuario = getattr(ctx, "correo_usuario", "") or ""
 
         with track_tool_execution("create_booking"):
-            # 1. VALIDAR datos de entrada
+            # 1. VALIDAR datos de entrada y normalizar (email lowercase, nombre title-case)
             logger.debug("[TOOL] create_booking - Validando datos de entrada")
-            is_valid, error = validate_booking_data(
-                date=date,
-                time=time,
-                customer_name=customer_name,
-                customer_contact=customer_contact
-            )
-
-            if not is_valid:
+            try:
+                bd = BookingData(
+                    date=date,
+                    time=time,
+                    customer_name=customer_name,
+                    customer_contact=customer_contact,
+                )
+            except ValidationError as e:
+                error = format_validation_error(e)
                 logger.warning("[TOOL] create_booking - Datos inválidos: %s", error)
                 return f"Datos inválidos: {error}\n\nPor favor verifica la información."
 
@@ -210,8 +212,8 @@ async def create_booking(
             booking_result = await confirm_booking(
                 usuario_id=usuario_id,
                 id_prospecto=id_prospecto_val,
-                nombre_completo=customer_name,
-                correo_cliente=customer_contact or "",
+                nombre_completo=bd.customer_name,
+                correo_cliente=bd.customer_contact,
                 fecha=date,
                 hora=time,
                 agendar_usuario=agendar_usuario,
@@ -231,7 +233,7 @@ async def create_booking(
                     "Detalles:",
                     f"• Fecha: {date}",
                     f"• Hora: {time}",
-                    f"• Nombre: {customer_name}",
+                    f"• Nombre: {bd.customer_name}",
                     "",
                 ]
                 if booking_result.get("google_meet_link"):

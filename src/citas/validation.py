@@ -103,7 +103,7 @@ class BookingData(BaseModel):
         return _check_time(v)
 
 
-def _format_validation_error(e: ValidationError) -> str:
+def format_validation_error(e: ValidationError) -> str:
     """Convierte ValidationError de Pydantic en un mensaje legible para el usuario."""
     errors = e.errors()
     if not errors:
@@ -152,7 +152,7 @@ def validate_booking_data(
         )
         return (True, None)
     except ValidationError as e:
-        return (False, _format_validation_error(e))
+        return (False, format_validation_error(e))
     except ValueError as e:
         return (False, str(e))
 
@@ -161,4 +161,5 @@ __all__ = [
     'BookingData',
     'validate_booking_data',
     'validate_date_format',
+    'format_validation_error',
 ]
