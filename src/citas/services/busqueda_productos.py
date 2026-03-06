@@ -176,7 +176,7 @@ async def _do_busqueda_api(
             "[BUSQUEDA] Error id_empresa=%s busqueda=%r: %s: %s",
             id_empresa, busqueda_norm, type(e).__name__, e,
         )
-        return {"success": False, "productos": [], "error": "La búsqueda tardó demasiado. Intenta de nuevo."}
+        return {"success": False, "productos": [], "error": "No se pudo completar la búsqueda. Intenta de nuevo."}
 
 
 # ---------------------------------------------------------------------------

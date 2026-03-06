@@ -41,9 +41,6 @@ async def fetch_contexto_negocio(
         return None
 
     _cb = cb or _default_informacion_cb
-    if _cb.is_open(id_empresa):
-        return None
-
     payload = {"codOpe": "OBTENER_CONTEXTO_NEGOCIO", "id_empresa": id_empresa}
     logger.debug("[CONTEXTO_NEGOCIO] Obteniendo contexto id_empresa=%s", id_empresa)
 

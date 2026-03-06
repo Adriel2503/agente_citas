@@ -57,8 +57,6 @@ class ScheduleValidator:
 
     async def _fetch_horario(self) -> dict | None:
         """Obtiene el horario directo desde la API (sin cache)."""
-        if self._informacion_cb.is_open(self.id_empresa):
-            return None
         payload = {"codOpe": "OBTENER_HORARIO_REUNIONES", "id_empresa": self.id_empresa}
         try:
             data = await resilient_call(

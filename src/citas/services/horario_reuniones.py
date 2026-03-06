@@ -74,9 +74,6 @@ async def fetch_horario_reuniones(
         return "No hay horario cargado."
 
     _cb = cb or _default_informacion_cb
-    if _cb.is_open(id_empresa):
-        return "No hay horario cargado."
-
     payload = {"codOpe": "OBTENER_HORARIO_REUNIONES", "id_empresa": id_empresa}
     logger.debug("[HORARIO] Fetching id_empresa=%s", id_empresa)
 
