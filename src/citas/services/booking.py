@@ -141,6 +141,10 @@ async def confirm_booking(
             }
 
     except httpx.TimeoutException:
+        # TimeoutException es subclase de RequestError — debe ir ANTES.
+        # Si se invierte el orden, ambos bloques siguen llamando record_failure
+        # (el CB no se rompe), pero se pierde la etiqueta de métrica "timeout"
+        # y el mensaje correcto al usuario.
         calendario_cb.record_failure("global")
         logger.error("[BOOKING] Timeout al crear evento")
         record_booking_failure("timeout")
@@ -161,6 +165,7 @@ async def confirm_booking(
         }
 
     except httpx.RequestError as e:
+        # Captura errores de transporte no cubiertos arriba (ej. ConnectError, ReadError).
         calendario_cb.record_failure("global")
         logger.error("[BOOKING] Error de conexión: %s", e)
         record_booking_failure("connection_error")
