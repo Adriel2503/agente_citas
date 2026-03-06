@@ -219,6 +219,11 @@ def record_chat_error(error_type: str):
     chat_errors_total.labels(error_type=error_type).inc()
 
 
+def record_tool_validation_error(tool_name: str):
+    """Registra un rechazo por validación de datos de entrada en una tool."""
+    tool_errors_total.labels(tool_name=tool_name, error_type="validation_error").inc()
+
+
 def update_cache_stats(cache_type: str, count: int):
     """Actualiza estadísticas de cache."""
     cache_entries.labels(cache_type=cache_type).set(count)
@@ -244,6 +249,7 @@ __all__ = [
     'record_booking_success',
     'record_booking_failure',
     'record_chat_error',
+    'record_tool_validation_error',
     'update_cache_stats',
     'initialize_agent_info',
     # Metrics (para acceso directo si necesario)

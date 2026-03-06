@@ -16,7 +16,7 @@ try:
     from ..services.booking import confirm_booking
     from ..services.busqueda_productos import buscar_productos_servicios, format_productos_para_respuesta
     from ..logger import get_logger
-    from ..metrics import track_tool_execution
+    from ..metrics import track_tool_execution, record_tool_validation_error
     from ..validation import BookingData, format_validation_error, validate_date_format
 except ImportError:
     from citas.services.schedule_validator import ScheduleValidator
@@ -24,7 +24,7 @@ except ImportError:
     from citas.services.booking import confirm_booking
     from citas.services.busqueda_productos import buscar_productos_servicios, format_productos_para_respuesta
     from citas.logger import get_logger
-    from citas.metrics import track_tool_execution
+    from citas.metrics import track_tool_execution, record_tool_validation_error
     from citas.validation import BookingData, format_validation_error, validate_date_format
 
 logger = get_logger(__name__)
@@ -186,6 +186,7 @@ async def create_booking(
             except ValidationError as e:
                 error = format_validation_error(e)
                 logger.warning("[TOOL] create_booking - Datos inválidos: %s", error)
+                record_tool_validation_error("create_booking")
                 return f"Datos inválidos: {error}\n\nPor favor verifica la información."
 
             # 2. VALIDAR horario con ScheduleValidator
