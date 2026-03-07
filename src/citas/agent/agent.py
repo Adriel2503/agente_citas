@@ -23,7 +23,7 @@ try:
     from ..metrics import track_chat_response, track_llm_call, record_chat_error, chat_requests_total, AGENT_CACHE
     from ..prompts import build_citas_system_prompt
     from .content import CitaStructuredResponse, _build_content
-    from .context import AgentContext, _validate_context, _prepare_agent_context
+    from .context import _validate_context, _prepare_agent_context
 except ImportError:
     from citas import config as app_config
     from citas.tool.tools import AGENT_TOOLS
@@ -31,7 +31,7 @@ except ImportError:
     from citas.metrics import track_chat_response, track_llm_call, record_chat_error, chat_requests_total, AGENT_CACHE
     from citas.prompts import build_citas_system_prompt
     from citas.agent.content import CitaStructuredResponse, _build_content
-    from citas.agent.context import AgentContext, _validate_context, _prepare_agent_context
+    from citas.agent.context import _validate_context, _prepare_agent_context
 
 logger = get_logger(__name__)
 
