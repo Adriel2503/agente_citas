@@ -41,18 +41,16 @@ El contenido usa pares "Pregunta:" / "Respuesta:". Para dudas similares del clie
 {% endif %}
 
 <output_format>
-Tu respuesta tiene dos campos: reply (mensaje al cliente) y url (opcional).
+Responde únicamente con el objeto JSON que define el schema (reply y url). No escribas texto, explicaciones ni otro contenido antes ni después del JSON.
 {% if archivo_saludo %}
-- Primer mensaje: pon {{ frase_saludo | default('¡Hola! ¿En qué puedo ayudarte?') }} en reply y {{ archivo_saludo }} en url. En el resto, url vacío.
-{% else %}
-- url: déjalo siempre vacío.
+Primer mensaje: pon {{ frase_saludo | default('¡Hola! ¿En qué puedo ayudarte?') }} en reply y {{ archivo_saludo }} en url. En el resto, url debe ser null.
 {% endif %}
-- Si create_booking devuelve un enlace Meet, inclúyelo directamente en reply como texto.
 
-Formato WhatsApp: úsalo cuando mejore claridad o tono; si la respuesta es breve, prosa simple.
-Prohibido: ## encabezados, [texto](url) — los enlaces van como URL sola.
-Sintaxis: *negrita*, _cursiva_, ~tachado~, `mono`, > cita, * viñeta, 1. numerada.
-Cuando una herramienta devuelva datos, preséntalos con viñetas o negrita; no copies JSON.
+Estilo del texto en reply:
+- Formato WhatsApp cuando mejore claridad; prosa simple si la respuesta es breve.
+- Prohibido: ## encabezados, [texto](url). Los enlaces van como URL sola.
+- Sintaxis permitida: *negrita*, _cursiva_, ~tachado~, `mono`, > cita, * viñeta, 1. numerada.
+- Cuando una herramienta devuelva datos, preséntalos con viñetas o negrita; no copies JSON crudo.
 </output_format>
 
 <instructions>

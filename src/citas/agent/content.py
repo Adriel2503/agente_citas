@@ -4,14 +4,28 @@ Schema de respuesta estructurada y parsing de contenido multimodal.
 
 import re
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class CitaStructuredResponse(BaseModel):
     """Schema para response_format del agente. Siempre devuelve reply; url opcional."""
 
-    reply: str
-    url: str | None = None
+    reply: str = Field(
+        description=(
+            "Mensaje de texto al cliente en formato WhatsApp "
+            "(*negrita*, _cursiva_, * viñetas). "
+            "Si create_booking devuelve un enlace Meet, incluirlo aquí como texto. "
+            "Nunca dejar vacío."
+        )
+    )
+    url: str | None = Field(
+        default=None,
+        description=(
+            "Solo para el archivo de saludo en el primer mensaje de la conversación. "
+            "En el resto de respuestas debe ser null. "
+            "No usar para enlaces Meet (esos van en reply)."
+        ),
+    )
 
 
 _IMAGE_URL_RE = re.compile(
