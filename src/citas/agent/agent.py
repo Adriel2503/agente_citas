@@ -4,9 +4,7 @@ Versión mejorada con logging, métricas, configuración centralizada y memoria 
 """
 
 import asyncio
-import re
 from typing import Any
-from dataclasses import dataclass
 
 import openai
 
@@ -17,7 +15,6 @@ from langchain.chat_models import init_chat_model
 from langchain_core.messages import trim_messages
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
-from pydantic import BaseModel
 
 try:
     from .. import config as app_config
@@ -25,27 +22,24 @@ try:
     from ..logger import get_logger
     from ..metrics import track_chat_response, track_llm_call, record_chat_error, chat_requests_total, AGENT_CACHE
     from ..prompts import build_citas_system_prompt
+    from .content import CitaStructuredResponse, _build_content
+    from .context import AgentContext, _validate_context, _prepare_agent_context
 except ImportError:
     from citas import config as app_config
     from citas.tool.tools import AGENT_TOOLS
     from citas.logger import get_logger
     from citas.metrics import track_chat_response, track_llm_call, record_chat_error, chat_requests_total, AGENT_CACHE
     from citas.prompts import build_citas_system_prompt
+    from citas.agent.content import CitaStructuredResponse, _build_content
+    from citas.agent.context import AgentContext, _validate_context, _prepare_agent_context
 
 logger = get_logger(__name__)
-
-
-class CitaStructuredResponse(BaseModel):
-    """Schema para response_format del agente. Siempre devuelve reply; url opcional."""
-
-    reply: str
-    url: str | None = None
 
 
 # Checkpointer global para memoria automática
 _checkpointer = InMemorySaver(
     serde=JsonPlusSerializer(
-        allowed_msgpack_modules=[("citas.agent.agent", "CitaStructuredResponse")]
+        allowed_json_modules=[("citas", "agent", "content", "CitaStructuredResponse")]
     )
 )
 
@@ -73,77 +67,6 @@ _agent_cache: TTLCache = TTLCache(
 # Crece con cada id_empresa nuevo; se limpia cuando supera _LOCKS_CLEANUP_THRESHOLD.
 _agent_cache_locks: dict[tuple, asyncio.Lock] = {}
 _LOCKS_CLEANUP_THRESHOLD = 750  # 1.5x cache maxsize; si se supera, se eliminan locks huérfanos
-
-_IMAGE_URL_RE = re.compile(
-    r"https?://\S+\.(?:jpg|jpeg|png|gif|webp)(?:\?\S*)?",
-    re.IGNORECASE,
-)
-_MAX_IMAGES = 10  # límite de OpenAI Vision
-
-
-def _build_content(message: str) -> str | list[dict]:
-    """
-    Devuelve string si no hay URLs de imagen (Caso 1),
-    o lista de bloques OpenAI Vision si las hay (Casos 2-5).
-
-    Casos:
-      1. Solo texto         -> str
-      2. Solo 1 URL         -> [{image_url}]
-      3. Texto + 1 URL      -> [{text}, {image_url}]
-      4. Solo N URLs        -> [{image_url}, ...]
-      5. Texto + N URLs     -> [{text}, {image_url}, ...]
-    """
-    urls = _IMAGE_URL_RE.findall(message)
-    if not urls:
-        return message  # Caso 1: sin cambio
-
-    urls = urls[:_MAX_IMAGES]
-    text = _IMAGE_URL_RE.sub("", message).strip()
-
-    blocks: list[dict] = []
-    if text:
-        blocks.append({"type": "text", "text": text})
-    for url in urls:
-        blocks.append({"type": "image_url", "image_url": {"url": url}})
-    return blocks
-
-
-@dataclass
-class AgentContext:
-    """
-    Esquema de contexto runtime para el agente.
-    Este contexto se inyecta en las tools que lo necesiten.
-    """
-    id_empresa: int
-    duracion_cita_minutos: int | None = None  # None = no enviado por el orquestador
-    slots: int | None = None  # None = no enviado por el orquestador
-    agendar_usuario: int = 1  # bandera agendar_usuario (1/0) para ScheduleValidator
-    usuario_id: int = 1  # ID real del usuario/vendedor (para CREAR_EVENTO)
-    correo_usuario: str = ""  # email del usuario/vendedor (desde orquestador)
-    agendar_sucursal: int = 0
-    id_prospecto: int = 0  # mismo que session_id del orquestador
-    session_id: int = 0
-
-
-def _validate_context(context: dict[str, Any]) -> None:
-    """
-    Valida que el contexto tenga los parámetros requeridos.
-    
-    Args:
-        context: Contexto con configuración del bot
-    
-    Raises:
-        ValueError: Si faltan parámetros requeridos
-    """
-    config_data: dict[str, Any] = context.get("config", {})
-    required_keys = ["id_empresa"]
-    missing = [k for k in required_keys if k not in config_data or config_data[k] is None]
-    
-    if missing:
-        raise ValueError(f"Context missing required keys in config: {missing}")
-    
-    logger.debug("[AGENT] Context validated: id_empresa=%s", config_data.get("id_empresa"))
-
 
 def _cleanup_stale_agent_locks(current_cache_key: tuple) -> None:
     """
@@ -304,73 +227,6 @@ async def _get_agent(config: dict[str, Any]):
             return agent
     finally:
         _agent_cache_locks.pop(cache_key, None)
-
-
-def _prepare_agent_context(context: dict[str, Any], session_id: int) -> AgentContext:
-    """
-    Prepara el contexto runtime para inyectar a las tools del agente.
-
-    Solo incluye en context_params los campos que el orquestador envió explícitamente
-    y con valor no-None. Los campos ausentes quedan con el default del dataclass
-    AgentContext, evitando pisar valores por accidente.
-
-    Conversiones por campo (heterogéneas, no extraíbles a un helper genérico):
-      - duracion_cita_minutos, slots: copia directa (int → int).
-      - usuario_id: cast explícito a int (el orquestador puede enviarlo como str).
-      - correo_usuario: cast a str + strip (elimina espacios accidentales).
-      - agendar_usuario, agendar_sucursal: bool o int → int (0/1).
-          Solo se acepta bool o int; cualquier otro tipo (ej. str "1") se ignora
-          para evitar conversiones silenciosas con semántica ambigua.
-
-    Args:
-        context: Contexto del orquestador con clave "config" conteniendo los parámetros.
-        session_id: ID de sesión (int, unificado con orquestador).
-                    Se asigna también a id_prospecto cuando este no viene explícito.
-
-    Returns:
-        AgentContext configurado con los valores del orquestador o los defaults del dataclass.
-    """
-    config_data: dict[str, Any] = context.get("config", {})
-
-    # id_empresa ya está validado, usar directamente
-    context_params: dict[str, Any] = {
-        "id_empresa": config_data["id_empresa"],
-        "session_id": session_id,
-        "id_prospecto": session_id,
-    }
-    
-    # Solo agregar valores que vienen del orquestador (si existen)
-    if "duracion_cita_minutos" in config_data and config_data["duracion_cita_minutos"] is not None:
-        context_params["duracion_cita_minutos"] = config_data["duracion_cita_minutos"]
-    
-    if "slots" in config_data and config_data["slots"] is not None:
-        context_params["slots"] = config_data["slots"]
-    
-    # agendar_usuario viene como bool del orquestador, convertir a int (para ScheduleValidator y payload CREAR_EVENTO)
-    if "agendar_usuario" in config_data and config_data["agendar_usuario"] is not None:
-        agendar_usuario = config_data["agendar_usuario"]
-        if isinstance(agendar_usuario, bool):
-            context_params["agendar_usuario"] = 1 if agendar_usuario else 0
-        elif isinstance(agendar_usuario, int):
-            context_params["agendar_usuario"] = agendar_usuario
-
-    # usuario_id: ID real del usuario/vendedor (para CREAR_EVENTO en ws_calendario)
-    if "usuario_id" in config_data and config_data["usuario_id"] is not None:
-        context_params["usuario_id"] = int(config_data["usuario_id"])
-
-    # correo_usuario: email del vendedor (para CREAR_EVENTO)
-    if "correo_usuario" in config_data and config_data["correo_usuario"] is not None:
-        context_params["correo_usuario"] = str(config_data["correo_usuario"]).strip()
-
-    # agendar_sucursal: bool o int → int
-    if "agendar_sucursal" in config_data and config_data["agendar_sucursal"] is not None:
-        agendar_sucursal = config_data["agendar_sucursal"]
-        if isinstance(agendar_sucursal, bool):
-            context_params["agendar_sucursal"] = 1 if agendar_sucursal else 0
-        elif isinstance(agendar_sucursal, int):
-            context_params["agendar_sucursal"] = agendar_sucursal
-
-    return AgentContext(**context_params)
 
 
 async def process_cita_message(
