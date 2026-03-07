@@ -112,8 +112,8 @@ async def chat(req: ChatRequest) -> ChatResponse:
             - config.correo_usuario (str, opcional): Email del usuario/vendedor
             - config.agendar_usuario (bool o int, opcional): 1=agendar por usuario (default: 1)
             - config.agendar_sucursal (bool o int, opcional): 1=agendar por sucursal (default: 0)
-            - config.duracion_cita_minutos (int, opcional): Duración en minutos (default: 60)
-            - config.slots (int, opcional): Slots disponibles (default: 60)
+            - config.duracion_cita_minutos (int, requerido): Duración de la cita en minutos
+            - config.slots (int, requerido): Capacidad de slots simultáneos
             - config.personalidad (str, opcional): Personalidad del agente
 
     Returns:

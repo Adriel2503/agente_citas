@@ -130,36 +130,8 @@ def validate_date_format(date: str) -> tuple[bool, str | None]:
         return (False, f"La fecha debe estar en formato YYYY-MM-DD (ej. 2026-01-27). Recibido: {s}.")
 
 
-def validate_booking_data(
-    date: str,
-    time: str,
-    customer_name: str,
-    customer_contact: str
-) -> tuple[bool, str | None]:
-    """
-    Valida todos los datos de una cita.
-
-    Returns:
-        (True, None) si todos los datos son válidos
-        (False, mensaje_error) si hay algún error
-    """
-    try:
-        BookingData(
-            date=date,
-            time=time,
-            customer_name=customer_name,
-            customer_contact=customer_contact
-        )
-        return (True, None)
-    except ValidationError as e:
-        return (False, format_validation_error(e))
-    except ValueError as e:
-        return (False, str(e))
-
-
 __all__ = [
     'BookingData',
-    'validate_booking_data',
     'validate_date_format',
     'format_validation_error',
 ]

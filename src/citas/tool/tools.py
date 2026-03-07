@@ -48,6 +48,26 @@ def _require_context(runtime: ToolRuntime | None, tool_name: str):
     return ctx
 
 
+def _check_required_config(duracion_cita_minutos: int | None, slots: int | None, tool_name: str) -> str | None:
+    """
+    Valida que duracion_cita_minutos y slots vengan del orquestador (no sean None).
+    Retorna mensaje de error si falta alguno, None si todo OK.
+    """
+    missing = []
+    if duracion_cita_minutos is None:
+        missing.append("duración de cita")
+    if slots is None:
+        missing.append("capacidad de slots")
+    if missing:
+        logger.error("[TOOL:%s] Configuración incompleta del orquestador: %s", tool_name, missing)
+        record_tool_validation_error(tool_name)
+        return (
+            f"No puedo procesar la solicitud: falta configurar {' y '.join(missing)}. "
+            "Por favor contacta al administrador."
+        )
+    return None
+
+
 @tool
 async def check_availability(
     date: str,
@@ -93,6 +113,10 @@ async def check_availability(
         slots = ctx.slots
         agendar_usuario = ctx.agendar_usuario
         agendar_sucursal = ctx.agendar_sucursal
+
+        missing = _check_required_config(duracion_cita_minutos, slots, "check_availability")
+        if missing:
+            return missing
 
         with track_tool_execution("check_availability"):
             recommender = ScheduleRecommender(
@@ -172,6 +196,10 @@ async def create_booking(
         id_prospecto = ctx.id_prospecto
         usuario_id = getattr(ctx, "usuario_id", 1)
         correo_usuario = getattr(ctx, "correo_usuario", "") or ""
+
+        missing = _check_required_config(duracion_cita_minutos, slots, "create_booking")
+        if missing:
+            return missing
 
         with track_tool_execution("create_booking"):
             # 1. VALIDAR datos de entrada y normalizar (email lowercase, nombre title-case)

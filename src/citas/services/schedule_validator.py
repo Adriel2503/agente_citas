@@ -10,8 +10,11 @@ from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+import httpx
+
 try:
     from ..logger import get_logger
+    from ..metrics import degradation_total
     from .. import config as app_config
     from .http_client import post_with_logging
     from .circuit_breaker import agendar_reunion_cb as _default_agendar_cb, informacion_cb as _default_informacion_cb
@@ -20,6 +23,7 @@ try:
     from .availability_client import check_slot_availability
 except ImportError:
     from citas.logger import get_logger
+    from citas.metrics import degradation_total
     from citas import config as app_config
     from citas.services.http_client import post_with_logging
     from citas.services.circuit_breaker import agendar_reunion_cb as _default_agendar_cb, informacion_cb as _default_informacion_cb
@@ -38,8 +42,8 @@ class ScheduleValidator:
     def __init__(
         self,
         id_empresa: int,
-        duracion_cita_minutos: int = 60,
-        slots: int = 60,
+        duracion_cita_minutos: int,
+        slots: int,
         agendar_usuario: int = 0,
         agendar_sucursal: int = 0,
         log_create_booking_apis: bool = False,
@@ -67,8 +71,13 @@ class ScheduleValidator:
             )
             if data.get("success") and data.get("horario_reuniones"):
                 return data["horario_reuniones"]
+            degradation_total.labels(service="schedule_fetch", reason="api_success_false").inc()
+        except RuntimeError:
+            degradation_total.labels(service="schedule_fetch", reason="circuit_open").inc()
+        except httpx.TransportError:
+            degradation_total.labels(service="schedule_fetch", reason="transport_error").inc()
         except Exception:
-            pass
+            degradation_total.labels(service="schedule_fetch", reason="unknown").inc()
         return None
 
     async def validate(self, fecha_str: str, hora_str: str) -> dict[str, Any]:

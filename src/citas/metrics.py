@@ -80,6 +80,16 @@ SEARCH_CACHE = Counter(
     ['result'],  # hit | miss | circuit_open
 )
 
+# Degradación de validación (B2 — riesgo de double booking)
+degradation_total = Counter(
+    'citas_availability_degradation_total',
+    'Veces que la validación degradó a available=True o valid=True por fallo',
+    ['service', 'reason'],
+    # service: availability_check | schedule_fetch
+    # reason: timeout | circuit_open | api_success_false | http_error |
+    #         transport_error | parse_error | unknown
+)
+
 # ========== HISTOGRAMAS (LATENCIA) ==========
 
 HTTP_DURATION = Histogram(
@@ -260,4 +270,5 @@ __all__ = [
     'HTTP_DURATION',
     'AGENT_CACHE',
     'SEARCH_CACHE',
+    'degradation_total',
 ]

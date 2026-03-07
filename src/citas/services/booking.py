@@ -36,7 +36,7 @@ async def confirm_booking(
     fecha: str,
     hora: str,
     agendar_usuario: int,
-    duracion_cita_minutos: int = 60,
+    duracion_cita_minutos: int,
     correo_usuario: str = "",
     log_create_booking_apis: bool = False,
 ) -> dict[str, Any]:

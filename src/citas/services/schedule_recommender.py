@@ -42,8 +42,8 @@ class ScheduleRecommender:
     def __init__(
         self,
         id_empresa: int,
-        duracion_cita_minutos: int = 60,
-        slots: int = 60,
+        duracion_cita_minutos: int,
+        slots: int,
         agendar_usuario: int = 0,
         agendar_sucursal: int = 0,
         agendar_cb: CircuitBreakerProtocol | None = None,
