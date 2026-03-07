@@ -16,6 +16,7 @@ from langchain.agents.middleware import wrap_model_call, ModelRequest, ModelResp
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import trim_messages
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from pydantic import BaseModel
 
 try:
@@ -42,7 +43,11 @@ class CitaStructuredResponse(BaseModel):
 
 
 # Checkpointer global para memoria automática
-_checkpointer = InMemorySaver()
+_checkpointer = InMemorySaver(
+    serde=JsonPlusSerializer(
+        allowed_msgpack_modules=[("citas.agent.agent", "CitaStructuredResponse")]
+    )
+)
 
 # Modelo LLM: singleton compartido por todas las empresas.
 # init_chat_model es síncrono; no hay riesgo de race condition en asyncio single-thread.
