@@ -30,6 +30,3 @@ dependencies = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/citas"]
-
-[tool.hatch.build.targets.wheel.force-include]
-"src/citas/prompts/citas_system.j2" = "citas/prompts/citas_system.j2"
