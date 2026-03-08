@@ -6,18 +6,11 @@ Sin cache propio: el agente (TTL 60 min) ya cachea el system prompt completo.
 
 from typing import Any
 
-try:
-    from .. import config as app_config
-    from ..logger import get_logger
-    from .http_client import post_with_logging
-    from .circuit_breaker import preguntas_cb as _default_preguntas_cb
-    from ._resilience import resilient_call, CircuitBreakerProtocol
-except ImportError:
-    from citas import config as app_config
-    from citas.logger import get_logger
-    from citas.services.http_client import post_with_logging
-    from citas.services.circuit_breaker import preguntas_cb as _default_preguntas_cb
-    from citas.services._resilience import resilient_call, CircuitBreakerProtocol
+from .. import config as app_config
+from ..logger import get_logger
+from .http_client import post_with_logging
+from .circuit_breaker import preguntas_cb as _default_preguntas_cb
+from ._resilience import resilient_call, CircuitBreakerProtocol
 
 logger = get_logger(__name__)
 

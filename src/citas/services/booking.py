@@ -9,20 +9,12 @@ import json
 import httpx
 from typing import Any
 
-try:
-    from ..logger import get_logger
-    from ..metrics import track_api_call, record_booking_attempt, record_booking_success, record_booking_failure
-    from .. import config as app_config
-    from .http_client import get_client
-    from .circuit_breaker import calendario_cb
-    from .time_parser import build_fecha_inicio_fin
-except ImportError:
-    from citas.logger import get_logger
-    from citas.metrics import track_api_call, record_booking_attempt, record_booking_success, record_booking_failure
-    from citas import config as app_config
-    from citas.services.http_client import get_client
-    from citas.services.circuit_breaker import calendario_cb
-    from citas.services.time_parser import build_fecha_inicio_fin
+from ..logger import get_logger
+from ..metrics import track_api_call, record_booking_attempt, record_booking_success, record_booking_failure
+from .. import config as app_config
+from .http_client import get_client
+from .circuit_breaker import calendario_cb
+from .time_parser import build_fecha_inicio_fin
 
 logger = get_logger(__name__)
 

@@ -10,22 +10,13 @@ from typing import Any
 from langchain.tools import tool, ToolRuntime
 from pydantic import ValidationError
 
-try:
-    from ..services.schedule_validator import ScheduleValidator
-    from ..services.schedule_recommender import ScheduleRecommender
-    from ..services.booking import confirm_booking
-    from ..services.busqueda_productos import buscar_productos_servicios, format_productos_para_respuesta
-    from ..logger import get_logger
-    from ..metrics import track_tool_execution, record_tool_validation_error
-    from ..validation import BookingData, format_validation_error, validate_date_format
-except ImportError:
-    from citas.services.schedule_validator import ScheduleValidator
-    from citas.services.schedule_recommender import ScheduleRecommender
-    from citas.services.booking import confirm_booking
-    from citas.services.busqueda_productos import buscar_productos_servicios, format_productos_para_respuesta
-    from citas.logger import get_logger
-    from citas.metrics import track_tool_execution, record_tool_validation_error
-    from citas.validation import BookingData, format_validation_error, validate_date_format
+from ..services.schedule_validator import ScheduleValidator
+from ..services.schedule_recommender import ScheduleRecommender
+from ..services.booking import confirm_booking
+from ..services.busqueda_productos import buscar_productos_servicios, format_productos_para_respuesta
+from ..logger import get_logger
+from ..metrics import track_tool_execution, record_tool_validation_error
+from ..validation import BookingData, format_validation_error, validate_date_format
 
 logger = get_logger(__name__)
 

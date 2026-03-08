@@ -12,24 +12,14 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-try:
-    from ..logger import get_logger
-    from ..metrics import degradation_total
-    from .. import config as app_config
-    from .http_client import post_with_logging
-    from .circuit_breaker import agendar_reunion_cb as _default_agendar_cb, informacion_cb as _default_informacion_cb
-    from ._resilience import resilient_call, CircuitBreakerProtocol
-    from .time_parser import parse_time, parse_time_range, is_time_blocked, DAY_FIELD_MAP, DIAS_NOMBRE
-    from .availability_client import check_slot_availability
-except ImportError:
-    from citas.logger import get_logger
-    from citas.metrics import degradation_total
-    from citas import config as app_config
-    from citas.services.http_client import post_with_logging
-    from citas.services.circuit_breaker import agendar_reunion_cb as _default_agendar_cb, informacion_cb as _default_informacion_cb
-    from citas.services._resilience import resilient_call, CircuitBreakerProtocol
-    from citas.services.time_parser import parse_time, parse_time_range, is_time_blocked, DAY_FIELD_MAP, DIAS_NOMBRE
-    from citas.services.availability_client import check_slot_availability
+from ..logger import get_logger
+from ..metrics import degradation_total
+from .. import config as app_config
+from .http_client import post_with_logging
+from .circuit_breaker import agendar_reunion_cb as _default_agendar_cb, informacion_cb as _default_informacion_cb
+from ._resilience import resilient_call, CircuitBreakerProtocol
+from .time_parser import parse_time, parse_time_range, is_time_blocked, DAY_FIELD_MAP, DIAS_NOMBRE
+from .availability_client import check_slot_availability
 
 logger = get_logger(__name__)
 

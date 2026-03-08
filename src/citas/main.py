@@ -17,20 +17,12 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from prometheus_client import make_asgi_app
 
-try:
-    from . import config as app_config
-    from .agent import process_cita_message
-    from .logger import setup_logging, get_logger
-    from .metrics import initialize_agent_info, HTTP_REQUESTS, HTTP_DURATION
-    from .services.http_client import close_http_client
-    from .services.circuit_breaker import get_health_issues
-except ImportError:
-    from citas import config as app_config
-    from citas.agent import process_cita_message
-    from citas.logger import setup_logging, get_logger
-    from citas.metrics import initialize_agent_info, HTTP_REQUESTS, HTTP_DURATION
-    from citas.services.http_client import close_http_client
-    from citas.services.circuit_breaker import get_health_issues
+from . import config as app_config
+from .agent import process_cita_message
+from .logger import setup_logging, get_logger
+from .metrics import initialize_agent_info, HTTP_REQUESTS, HTTP_DURATION
+from .services.http_client import close_http_client
+from .services.circuit_breaker import get_health_issues
 
 # Configurar logging antes de cualquier otra cosa
 log_level = getattr(logging, app_config.LOG_LEVEL.upper(), logging.INFO)
@@ -193,7 +185,7 @@ async def health():
 # Entrypoint
 # ---------------------------------------------------------------------------
 
-if __name__ == "__main__":
+def main():
     logger.info("=" * 60)
     logger.info("INICIANDO AGENTE CITAS - MaravIA")
     logger.info("=" * 60)
@@ -224,3 +216,7 @@ if __name__ == "__main__":
         host=app_config.SERVER_HOST,
         port=app_config.SERVER_PORT,
     )
+
+
+if __name__ == "__main__":
+    main()

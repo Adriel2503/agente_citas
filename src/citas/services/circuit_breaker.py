@@ -20,12 +20,8 @@ from typing import Any
 
 from cachetools import TTLCache
 
-try:
-    from ..logger import get_logger
-    from .. import config as app_config
-except ImportError:
-    from citas.logger import get_logger
-    from citas import config as app_config
+from ..logger import get_logger
+from .. import config as app_config
 
 logger = get_logger(__name__)
 

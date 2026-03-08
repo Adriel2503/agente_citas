@@ -6,20 +6,12 @@ El agent cache (60 min) protege esta llamada — se ejecuta una vez por empresa 
 
 from typing import Any
 
-try:
-    from .. import config as app_config
-    from ..logger import get_logger
-    from .http_client import post_with_logging
-    from .circuit_breaker import informacion_cb as _default_informacion_cb
-    from ._resilience import resilient_call, CircuitBreakerProtocol
-    from .time_parser import DIAS_ORDEN
-except ImportError:
-    from citas import config as app_config
-    from citas.logger import get_logger
-    from citas.services.http_client import post_with_logging
-    from citas.services.circuit_breaker import informacion_cb as _default_informacion_cb
-    from citas.services._resilience import resilient_call, CircuitBreakerProtocol
-    from citas.services.time_parser import DIAS_ORDEN
+from .. import config as app_config
+from ..logger import get_logger
+from .http_client import post_with_logging
+from .circuit_breaker import informacion_cb as _default_informacion_cb
+from ._resilience import resilient_call, CircuitBreakerProtocol
+from .time_parser import DIAS_ORDEN
 
 logger = get_logger(__name__)
 

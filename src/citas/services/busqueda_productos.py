@@ -18,20 +18,12 @@ from typing import Any
 
 from cachetools import TTLCache
 
-try:
-    from .. import config as app_config
-    from ..logger import get_logger
-    from ..metrics import SEARCH_CACHE
-    from .http_client import post_with_logging
-    from .circuit_breaker import informacion_cb
-    from ._resilience import resilient_call
-except ImportError:
-    from citas import config as app_config
-    from citas.logger import get_logger
-    from citas.metrics import SEARCH_CACHE
-    from citas.services.http_client import post_with_logging
-    from citas.services.circuit_breaker import informacion_cb
-    from citas.services._resilience import resilient_call
+from .. import config as app_config
+from ..logger import get_logger
+from ..metrics import SEARCH_CACHE
+from .http_client import post_with_logging
+from .circuit_breaker import informacion_cb
+from ._resilience import resilient_call
 
 logger = get_logger(__name__)
 

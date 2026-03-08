@@ -12,24 +12,14 @@ from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-try:
-    from ..logger import get_logger
-    from ..metrics import track_api_call
-    from .. import config as app_config
-    from .http_client import post_with_logging
-    from .circuit_breaker import agendar_reunion_cb as _default_agendar_cb
-    from ._resilience import resilient_call, CircuitBreakerProtocol
-    from .availability_client import check_slot_availability
-    from .time_parser import DIAS_ESPANOL
-except ImportError:
-    from citas.logger import get_logger
-    from citas.metrics import track_api_call
-    from citas import config as app_config
-    from citas.services.http_client import post_with_logging
-    from citas.services.circuit_breaker import agendar_reunion_cb as _default_agendar_cb
-    from citas.services._resilience import resilient_call, CircuitBreakerProtocol
-    from citas.services.availability_client import check_slot_availability
-    from citas.services.time_parser import DIAS_ESPANOL
+from ..logger import get_logger
+from ..metrics import track_api_call
+from .. import config as app_config
+from .http_client import post_with_logging
+from .circuit_breaker import agendar_reunion_cb as _default_agendar_cb
+from ._resilience import resilient_call, CircuitBreakerProtocol
+from .availability_client import check_slot_availability
+from .time_parser import DIAS_ESPANOL
 
 logger = get_logger(__name__)
 

@@ -7,18 +7,11 @@ Devuelve solo nombres (máx 10 de cada) para inyectar en el system prompt.
 import asyncio
 from typing import Any
 
-try:
-    from .. import config as app_config
-    from ..logger import get_logger
-    from .http_client import post_with_logging
-    from .circuit_breaker import informacion_cb as _default_informacion_cb
-    from ._resilience import resilient_call, CircuitBreakerProtocol
-except ImportError:
-    from citas import config as app_config
-    from citas.logger import get_logger
-    from citas.services.http_client import post_with_logging
-    from citas.services.circuit_breaker import informacion_cb as _default_informacion_cb
-    from citas.services._resilience import resilient_call, CircuitBreakerProtocol
+from .. import config as app_config
+from ..logger import get_logger
+from .http_client import post_with_logging
+from .circuit_breaker import informacion_cb as _default_informacion_cb
+from ._resilience import resilient_call, CircuitBreakerProtocol
 
 logger = get_logger(__name__)
 

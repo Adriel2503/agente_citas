@@ -10,20 +10,12 @@ from zoneinfo import ZoneInfo
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-try:
-    from .. import config as app_config
-    from ..logger import get_logger
-    from ..services.contexto_negocio import fetch_contexto_negocio
-    from ..services.horario_reuniones import fetch_horario_reuniones
-    from ..services.productos_servicios_citas import fetch_nombres_productos_servicios, format_nombres_para_prompt
-    from ..services.preguntas_frecuentes import fetch_preguntas_frecuentes
-except ImportError:
-    from citas import config as app_config
-    from citas.logger import get_logger
-    from citas.services.contexto_negocio import fetch_contexto_negocio
-    from citas.services.horario_reuniones import fetch_horario_reuniones
-    from citas.services.productos_servicios_citas import fetch_nombres_productos_servicios, format_nombres_para_prompt
-    from citas.services.preguntas_frecuentes import fetch_preguntas_frecuentes
+from .. import config as app_config
+from ..logger import get_logger
+from ..services.contexto_negocio import fetch_contexto_negocio
+from ..services.horario_reuniones import fetch_horario_reuniones
+from ..services.productos_servicios_citas import fetch_nombres_productos_servicios, format_nombres_para_prompt
+from ..services.preguntas_frecuentes import fetch_preguntas_frecuentes
 
 logger = get_logger(__name__)
 

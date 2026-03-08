@@ -20,10 +20,7 @@ from typing import Any, Awaitable, Callable, Protocol
 
 import httpx
 
-try:
-    from ..logger import get_logger
-except ImportError:
-    from citas.logger import get_logger
+from ..logger import get_logger
 
 logger = get_logger(__name__)
 
