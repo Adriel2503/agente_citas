@@ -15,9 +15,7 @@ import httpx
 from ..logger import get_logger
 from ..metrics import degradation_total
 from .. import config as app_config
-from .http_client import post_with_logging
-from .circuit_breaker import agendar_reunion_cb as _default_agendar_cb, informacion_cb as _default_informacion_cb
-from ._resilience import resilient_call, CircuitBreakerProtocol
+from .infra import post_with_logging, agendar_reunion_cb as _default_agendar_cb, informacion_cb as _default_informacion_cb, resilient_call, CircuitBreakerProtocol
 from .time_parser import parse_time, parse_time_range, is_time_blocked, DAY_FIELD_MAP, DIAS_NOMBRE
 from .availability_client import check_slot_availability
 

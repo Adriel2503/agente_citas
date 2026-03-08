@@ -3,7 +3,7 @@ Servicios del agente de citas: booking, horario_reuniones, schedule_validator,
 schedule_recommender, productos_servicios_citas, busqueda_productos.
 """
 
-from .http_client import get_client, close_http_client
+from .infra import get_client, close_http_client
 from .booking import confirm_booking
 from .contexto_negocio import fetch_contexto_negocio
 from .horario_reuniones import fetch_horario_reuniones

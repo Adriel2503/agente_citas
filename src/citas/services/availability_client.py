@@ -13,9 +13,7 @@ from typing import Any
 from ..logger import get_logger
 from ..metrics import track_api_call, degradation_total
 from .. import config as app_config
-from .http_client import post_with_logging
-from .circuit_breaker import agendar_reunion_cb as _default_agendar_cb
-from ._resilience import resilient_call, CircuitBreakerProtocol
+from .infra import post_with_logging, agendar_reunion_cb as _default_agendar_cb, resilient_call, CircuitBreakerProtocol
 from .time_parser import parse_time
 
 logger = get_logger(__name__)

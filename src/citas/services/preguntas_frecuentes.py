@@ -8,9 +8,7 @@ from typing import Any
 
 from .. import config as app_config
 from ..logger import get_logger
-from .http_client import post_with_logging
-from .circuit_breaker import preguntas_cb as _default_preguntas_cb
-from ._resilience import resilient_call, CircuitBreakerProtocol
+from .infra import post_with_logging, preguntas_cb as _default_preguntas_cb, resilient_call, CircuitBreakerProtocol
 
 logger = get_logger(__name__)
 
