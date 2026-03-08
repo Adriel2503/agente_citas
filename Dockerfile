@@ -19,10 +19,13 @@ RUN adduser \
     --uid "${UID}" \
     appuser
 
+# Instalar uv (gestor de paquetes rápido)
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
 # Dependencias primero (mejor uso de caché)
 COPY requirements.txt .
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --no-cache-dir -r requirements.txt
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system -r requirements.txt
 
 USER appuser
 
