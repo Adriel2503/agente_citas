@@ -48,16 +48,16 @@ def _require_context(runtime: ToolRuntime | None, tool_name: str):
     return ctx
 
 
-def _check_required_config(duracion_cita_minutos: int | None, slots: int | None, tool_name: str) -> str | None:
+def _check_required_config(checks: dict[str, Any], tool_name: str) -> str | None:
     """
-    Valida que duracion_cita_minutos y slots vengan del orquestador (no sean None).
+    Valida que los campos requeridos del orquestador no sean None.
     Retorna mensaje de error si falta alguno, None si todo OK.
+
+    Args:
+        checks: dict {etiqueta_legible: valor} — cada valor None se reporta como faltante.
+        tool_name: nombre de la tool (para logging y métricas).
     """
-    missing = []
-    if duracion_cita_minutos is None:
-        missing.append("duración de cita")
-    if slots is None:
-        missing.append("capacidad de slots")
+    missing = [label for label, value in checks.items() if value is None]
     if missing:
         logger.error("[TOOL:%s] Configuración incompleta del orquestador: %s", tool_name, missing)
         record_tool_validation_error(tool_name)
@@ -114,7 +114,10 @@ async def check_availability(
         agendar_usuario = ctx.agendar_usuario
         agendar_sucursal = ctx.agendar_sucursal
 
-        missing = _check_required_config(duracion_cita_minutos, slots, "check_availability")
+        missing = _check_required_config({
+            "duración de cita": duracion_cita_minutos,
+            "capacidad de slots": slots,
+        }, "check_availability")
         if missing:
             return missing
 
@@ -194,10 +197,15 @@ async def create_booking(
         agendar_usuario = ctx.agendar_usuario
         agendar_sucursal = ctx.agendar_sucursal
         id_prospecto = ctx.id_prospecto
-        usuario_id = getattr(ctx, "usuario_id", 1)
-        correo_usuario = getattr(ctx, "correo_usuario", "") or ""
+        usuario_id = ctx.usuario_id
+        correo_usuario = ctx.correo_usuario
 
-        missing = _check_required_config(duracion_cita_minutos, slots, "create_booking")
+        missing = _check_required_config({
+            "duración de cita": duracion_cita_minutos,
+            "capacidad de slots": slots,
+            "ID de usuario/vendedor": usuario_id,
+            "correo del usuario/vendedor": correo_usuario,
+        }, "create_booking")
         if missing:
             return missing
 
@@ -237,10 +245,9 @@ async def create_booking(
 
             # 3. Crear evento en ws_calendario (CREAR_EVENTO)
             logger.debug("[TOOL] create_booking - Creando evento en API")
-            id_prospecto_val = id_prospecto if (id_prospecto and id_prospecto > 0) else ctx.session_id
             booking_result = await confirm_booking(
                 usuario_id=usuario_id,
-                id_prospecto=id_prospecto_val,
+                id_prospecto=id_prospecto,
                 nombre_completo=bd.customer_name,
                 correo_cliente=bd.customer_contact,
                 fecha=date,

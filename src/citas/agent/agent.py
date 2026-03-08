@@ -16,22 +16,13 @@ from langchain_core.messages import trim_messages
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
-try:
-    from .. import config as app_config
-    from ..tool.tools import AGENT_TOOLS
-    from ..logger import get_logger
-    from ..metrics import track_chat_response, track_llm_call, record_chat_error, chat_requests_total, AGENT_CACHE
-    from ..prompts import build_citas_system_prompt
-    from .content import CitaStructuredResponse, _build_content
-    from .context import _validate_context, _prepare_agent_context
-except ImportError:
-    from citas import config as app_config
-    from citas.tool.tools import AGENT_TOOLS
-    from citas.logger import get_logger
-    from citas.metrics import track_chat_response, track_llm_call, record_chat_error, chat_requests_total, AGENT_CACHE
-    from citas.prompts import build_citas_system_prompt
-    from citas.agent.content import CitaStructuredResponse, _build_content
-    from citas.agent.context import _validate_context, _prepare_agent_context
+from .. import config as app_config
+from ..tool.tools import AGENT_TOOLS
+from ..logger import get_logger
+from ..metrics import track_chat_response, track_llm_call, record_chat_error, chat_requests_total, AGENT_CACHE
+from ..prompts import build_citas_system_prompt
+from .content import CitaStructuredResponse, _build_content
+from .context import _validate_context, _prepare_agent_context
 
 logger = get_logger(__name__)
 
@@ -166,7 +157,7 @@ async def _get_agent(config: dict[str, Any]):
     Utiliza TTLCache para evitar recrear el cliente OpenAI, las HTTP calls
     del prompt y la compilación del grafo LangGraph en cada mensaje. El TTL
     se gobierna con AGENT_CACHE_TTL_MINUTES (default 60 min), independiente
-    independiente del horario de reuniones (sin cache propio).
+    del horario de reuniones (sin cache propio).
 
     Incluye doble verificación con asyncio.Lock por cache_key para serializar
     la primera creación cuando múltiples sesiones de la misma empresa llegan

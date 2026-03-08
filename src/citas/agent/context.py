@@ -5,10 +5,7 @@ Modelo de contexto runtime y funciones de validación/preparación.
 from dataclasses import dataclass
 from typing import Any
 
-try:
-    from ..logger import get_logger
-except ImportError:
-    from citas.logger import get_logger
+from ..logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -23,8 +20,8 @@ class AgentContext:
     duracion_cita_minutos: int | None = None  # None = no enviado por el orquestador
     slots: int | None = None  # None = no enviado por el orquestador
     agendar_usuario: int = 1  # bandera agendar_usuario (1/0) para ScheduleValidator
-    usuario_id: int = 1  # ID real del usuario/vendedor (para CREAR_EVENTO)
-    correo_usuario: str = ""  # email del usuario/vendedor (desde orquestador)
+    usuario_id: int | None = None  # None = no enviado por el orquestador (requerido para CREAR_EVENTO)
+    correo_usuario: str | None = None  # None = no enviado por el orquestador (requerido para CREAR_EVENTO)
     agendar_sucursal: int = 0
     id_prospecto: int = 0  # mismo que session_id del orquestador
     session_id: int = 0
@@ -41,13 +38,11 @@ def _validate_context(context: dict[str, Any]) -> None:
         ValueError: Si faltan parámetros requeridos
     """
     config_data: dict[str, Any] = context.get("config", {})
-    required_keys = ["id_empresa"]
-    missing = [k for k in required_keys if k not in config_data or config_data[k] is None]
 
-    if missing:
-        raise ValueError(f"Context missing required keys in config: {missing}")
+    if "id_empresa" not in config_data or config_data["id_empresa"] is None:
+        raise ValueError("Context missing required key in config: id_empresa")
 
-    logger.debug("[AGENT] Context validated: id_empresa=%s", config_data.get("id_empresa"))
+    logger.debug("[AGENT] Context validated: id_empresa=%s", config_data["id_empresa"])
 
 
 def _prepare_agent_context(context: dict[str, Any], session_id: int) -> AgentContext:
