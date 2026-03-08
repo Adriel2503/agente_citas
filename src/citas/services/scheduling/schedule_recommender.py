@@ -153,11 +153,7 @@ class ScheduleRecommender:
                 mensaje = data.get("mensaje", "Horarios disponibles encontrados")
                 total = data.get("total", 0)
                 if sugerencias and total > 0:
-                    sugerencias_texto = []
-                    for i, sugerencia in enumerate(sugerencias, 1):
-                        texto = self._format_sugerencia(i, sugerencia)
-                        if texto:
-                            sugerencias_texto.append(texto)
+                    sugerencias_texto = [t for i, s in enumerate(sugerencias, 1) if (t := self._format_sugerencia(i, s))]
                     if sugerencias_texto:
                         texto_final = (
                             f"{mensaje}\n\n" + "\n".join(sugerencias_texto)
