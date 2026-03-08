@@ -10,9 +10,7 @@ from typing import Any
 from langchain.tools import tool, ToolRuntime
 from pydantic import ValidationError
 
-from ..services.schedule_validator import ScheduleValidator
-from ..services.schedule_recommender import ScheduleRecommender
-from ..services.booking import confirm_booking
+from ..services.scheduling import ScheduleValidator, ScheduleRecommender, confirm_booking
 from ..services.busqueda_productos import buscar_productos_servicios, format_productos_para_respuesta
 from ..logger import get_logger
 from ..metrics import track_tool_execution, record_tool_validation_error

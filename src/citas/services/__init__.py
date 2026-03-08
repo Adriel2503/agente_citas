@@ -4,12 +4,8 @@ schedule_recommender, productos_servicios_citas, busqueda_productos.
 """
 
 from .infra import get_client, close_http_client
-from .booking import confirm_booking
-from .prompt_data import fetch_contexto_negocio
-from .prompt_data import fetch_horario_reuniones
-from .schedule_validator import ScheduleValidator
-from .schedule_recommender import ScheduleRecommender
-from .time_parser import parse_time, parse_time_range, is_time_blocked
+from .scheduling import confirm_booking, ScheduleValidator, ScheduleRecommender, parse_time, parse_time_range, is_time_blocked
+from .prompt_data import fetch_contexto_negocio, fetch_horario_reuniones
 from .prompt_data import fetch_nombres_productos_servicios, format_nombres_para_prompt
 from .busqueda_productos import buscar_productos_servicios, format_productos_para_respuesta
 from .prompt_data import fetch_preguntas_frecuentes, format_preguntas_frecuentes_para_prompt
