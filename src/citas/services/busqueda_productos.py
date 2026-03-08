@@ -68,20 +68,8 @@ def _format_precio(precio: Any) -> str:
         return "-"
 
 
-def _format_precio_linea(precio_str: str, es_servicio: bool, unidad: str) -> str:
-    """Línea de precio: solo monto para servicio; monto + unidad para producto."""
-    if es_servicio:
-        return f"- Precio: {precio_str}"
-    return f"- Precio: {precio_str} por {unidad}"
-
-
-def _format_item(p: dict[str, Any]) -> list[str]:
-    """
-    Formato único para Producto y Servicio:
-    - Producto: Precio por unidad (nombre_unidad de API).
-    - Servicio: Solo precio, sin "por" ni unidad.
-    Sin SKU en ninguno.
-    """
+def _format_item(p: dict[str, Any]) -> str:
+    """Formato único para Producto y Servicio."""
     nombre = (p.get("nombre") or "-").strip()
     precio_str = _format_precio(p.get("precio_unitario"))
     categoria = (p.get("nombre_categoria") or "-").strip()
@@ -89,29 +77,16 @@ def _format_item(p: dict[str, Any]) -> list[str]:
 
     tipo = (p.get("nombre_tipo_producto") or "").strip().lower()
     es_servicio = tipo == "servicio"
-    unidad = (p.get("nombre_unidad") or "unidad").strip().lower() if not es_servicio else ""
+    linea_precio = f"- Precio: {precio_str}" if es_servicio else f"- Precio: {precio_str} por {(p.get('nombre_unidad') or 'unidad').strip().lower()}"
 
-    linea_precio = _format_precio_linea(precio_str, es_servicio, unidad)
-
-    lineas = [
-        f"### {nombre}",
-        linea_precio,
-        f"- Categoría: {categoria}",
-        f"- Descripción: {descripcion}",
-        "",
-    ]
-    return lineas
+    return f"### {nombre}\n{linea_precio}\n- Categoría: {categoria}\n- Descripción: {descripcion}"
 
 
 def format_productos_para_respuesta(productos: list[dict[str, Any]]) -> str:
     """Formatea la lista de productos/servicios para la respuesta de la tool."""
     if not productos:
         return "No se encontraron resultados."
-
-    lineas = []
-    for p in productos:
-        lineas.extend(_format_item(p))
-    return "\n".join(lineas).strip()
+    return "\n\n".join(_format_item(p) for p in productos)
 
 
 # ---------------------------------------------------------------------------
@@ -195,7 +170,7 @@ async def buscar_productos_servicios(
     if not busqueda or not str(busqueda).strip():
         return {"success": False, "productos": [], "error": "El término de búsqueda no puede estar vacío"}
 
-    busqueda_norm = str(busqueda).strip()
+    busqueda_norm = busqueda.strip()
     cache_key = (id_empresa, busqueda_norm.lower())
 
     # 1. Cache hit — respuesta inmediata sin tocar la red
