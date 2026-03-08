@@ -26,6 +26,14 @@ from .context import _validate_context, _prepare_agent_context
 
 logger = get_logger(__name__)
 
+# Mapeo de errores OpenAI: tipo → (log_level, metric_key, log_tag, mensaje_usuario)
+_OPENAI_ERRORS: dict[type, tuple[str, str, str, str]] = {
+    openai.AuthenticationError: ("critical", "openai_auth_error", "OpenAI-401", "No puedo procesar tu mensaje, la clave de acceso al servicio no es válida."),
+    openai.RateLimitError: ("warning", "openai_rate_limit", "OpenAI-429", "Estoy recibiendo demasiadas solicitudes en este momento, por favor intenta en unos segundos."),
+    openai.InternalServerError: ("error", "openai_server_error", "OpenAI-5xx", "El servicio de inteligencia artificial está presentando problemas, por favor intenta nuevamente."),
+    openai.APIConnectionError: ("error", "openai_connection_error", "OpenAI-conn", "No pude conectarme al servicio de inteligencia artificial, por favor intenta nuevamente."),
+    openai.BadRequestError: ("warning", "openai_bad_request", "OpenAI-400", "Tu mensaje no pudo ser procesado por el servicio, ¿puedes reformularlo?"),
+}
 
 # Checkpointer global para memoria automática
 _checkpointer = InMemorySaver(
@@ -325,26 +333,11 @@ async def process_cita_message(
 
             logger.debug("[AGENT] Respuesta generada: %s...", (reply[:200], url))
 
-        except openai.AuthenticationError as e:
-            logger.critical("[AGENT][OpenAI-401] API key inválida - Session: %s | %s", session_id, e)
-            record_chat_error("openai_auth_error")
-            return ("No puedo procesar tu mensaje, la clave de acceso al servicio no es válida.", None)
-        except openai.RateLimitError as e:
-            logger.warning("[AGENT][OpenAI-429] Rate limit alcanzado - Session: %s | %s", session_id, e)
-            record_chat_error("openai_rate_limit")
-            return ("Estoy recibiendo demasiadas solicitudes en este momento, por favor intenta en unos segundos.", None)
-        except openai.InternalServerError as e:
-            logger.error("[AGENT][OpenAI-5xx] Error interno OpenAI - Session: %s | %s", session_id, e)
-            record_chat_error("openai_server_error")
-            return ("El servicio de inteligencia artificial está presentando problemas, por favor intenta nuevamente.", None)
-        except openai.APIConnectionError as e:
-            logger.error("[AGENT][OpenAI-conn] Error de conexión con OpenAI - Session: %s | %s", session_id, e)
-            record_chat_error("openai_connection_error")
-            return ("No pude conectarme al servicio de inteligencia artificial, por favor intenta nuevamente.", None)
-        except openai.BadRequestError as e:
-            logger.warning("[AGENT][OpenAI-400] Bad request - Session: %s | %s", session_id, e)
-            record_chat_error("openai_bad_request")
-            return ("Tu mensaje no pudo ser procesado por el servicio, ¿puedes reformularlo?", None)
+        except tuple(_OPENAI_ERRORS.keys()) as e:
+            log_level, error_key, log_tag, user_msg = _OPENAI_ERRORS[type(e)]
+            getattr(logger, log_level)("[AGENT][%s] Session: %s | %s", log_tag, session_id, e)
+            record_chat_error(error_key)
+            return (user_msg, None)
         except Exception as e:
             logger.error("[AGENT] Error inesperado (%s) - Session: %s | %s", type(e).__name__, session_id, e, exc_info=True)
             record_chat_error("agent_execution_error")
