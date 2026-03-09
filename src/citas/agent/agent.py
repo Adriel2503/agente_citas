@@ -19,7 +19,7 @@ from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from .. import config as app_config
 from ..tool.tools import AGENT_TOOLS
 from ..logger import get_logger
-from ..metrics import track_chat_response, track_llm_call, record_chat_error, chat_requests_total, AGENT_CACHE
+from ..metrics import track_chat_response, track_llm_call, record_chat_error, chat_requests_total, AGENT_CACHE, update_cache_stats
 from ..prompts import build_citas_system_prompt
 from .content import CitaStructuredResponse, _build_content
 from .context import _validate_context, _prepare_agent_context
@@ -182,6 +182,7 @@ async def _get_agent(config: dict[str, Any]):
     # Fast path: cache hit (sin await, atómico en asyncio single-thread)
     if cache_key in _agent_cache:
         AGENT_CACHE.labels(result="hit").inc()
+        update_cache_stats("agent", len(_agent_cache))
         logger.debug("[AGENT] Cache hit - id_empresa=%s", cache_key[0])
         return _agent_cache[cache_key]
 
@@ -193,6 +194,7 @@ async def _get_agent(config: dict[str, Any]):
             # Double-check tras adquirir el lock (otra coroutine pudo haberlo creado)
             if cache_key in _agent_cache:
                 AGENT_CACHE.labels(result="hit").inc()
+                update_cache_stats("agent", len(_agent_cache))
                 logger.debug("[AGENT] Cache hit tras lock - id_empresa=%s", cache_key[0])
                 return _agent_cache[cache_key]
 
@@ -217,6 +219,7 @@ async def _get_agent(config: dict[str, Any]):
             )
 
             _agent_cache[cache_key] = agent
+            update_cache_stats("agent", len(_agent_cache))
             logger.debug(
                 "[AGENT] Agente cacheado - id_empresa=%s, Tools: %s, TTL: %ss",
                 cache_key[0],
@@ -253,6 +256,18 @@ async def process_cita_message(
     # Validaciones rápidas FUERA del lock (no tocan estado compartido)
     if not message or not message.strip():
         return ("No recibí tu mensaje. ¿Podrías repetirlo?", None)
+
+    # Comandos del sistema (interceptados antes del lock y del agente)
+    _cmd = message.strip().lower()
+    if _cmd == "/clear":
+        if session_id is not None and session_id >= 0:
+            await _checkpointer.adelete_thread(str(session_id))
+            logger.info("[AGENT] /clear ejecutado - Session: %s", session_id)
+        return ("Historial limpiado. ¿En qué puedo ayudarte?", None)
+
+    if _cmd == "/restart":
+        logger.warning("[AGENT] /restart solicitado - Session: %s (comando reservado, sin acción)", session_id)
+        return ("Este comando está reservado para administradores.", None)
 
     if session_id is None or session_id < 0:
         raise ValueError("session_id es requerido (entero no negativo)")

@@ -20,7 +20,7 @@ from cachetools import TTLCache
 
 from .. import config as app_config
 from ..logger import get_logger
-from ..metrics import SEARCH_CACHE
+from ..metrics import SEARCH_CACHE, update_cache_stats
 from .infra import post_with_logging, informacion_cb, resilient_call
 
 logger = get_logger(__name__)
@@ -130,6 +130,7 @@ async def _do_busqueda_api(
 
         # Éxito: cachear resultado
         _busqueda_cache[cache_key] = resultado
+        update_cache_stats("search", len(_busqueda_cache))
         logger.debug(
             "[BUSQUEDA] Cache SET id_empresa=%s busqueda=%r (%s productos)",
             id_empresa, busqueda_norm, len(productos),
@@ -176,6 +177,7 @@ async def buscar_productos_servicios(
     # 1. Cache hit — respuesta inmediata sin tocar la red
     if cache_key in _busqueda_cache:
         SEARCH_CACHE.labels(result="hit").inc()
+        update_cache_stats("search", len(_busqueda_cache))
         logger.debug("[BUSQUEDA] Cache HIT id_empresa=%s busqueda=%r", id_empresa, busqueda_norm)
         return _busqueda_cache[cache_key]
 
@@ -202,6 +204,7 @@ async def buscar_productos_servicios(
             # Double-check: otro request puede haber populado el cache mientras esperábamos
             if cache_key in _busqueda_cache:
                 SEARCH_CACHE.labels(result="hit").inc()
+                update_cache_stats("search", len(_busqueda_cache))
                 logger.debug(
                     "[BUSQUEDA] Cache HIT (post-lock) id_empresa=%s busqueda=%r",
                     id_empresa, busqueda_norm,
