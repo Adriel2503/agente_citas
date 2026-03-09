@@ -33,8 +33,14 @@ def format_preguntas_frecuentes_para_prompt(items: list[dict[str, Any]]) -> str:
         respuesta = (item.get("respuesta") or "").strip()
         if not pregunta and not respuesta:
             continue
+        categoria = (item.get("categoria") or "").strip()
+        if categoria:
+            lineas.append(f"[{categoria}]")
         lineas.append(f"Pregunta: {pregunta or '(sin texto)'}")
         lineas.append(f"Respuesta: {respuesta or '(sin texto)'}")
+        archivo = (item.get("archivo_ayuda") or "").strip()
+        if archivo:
+            lineas.append(f"Archivo de ayuda: {archivo}")
         lineas.append("")
 
     return "\n".join(lineas).strip() if lineas else ""

@@ -262,11 +262,11 @@ async def process_cita_message(
     if _cmd == "/clear":
         if session_id is not None and session_id >= 0:
             await _checkpointer.adelete_thread(str(session_id))
-            logger.info("[AGENT] /clear ejecutado - Session: %s", session_id)
+        logger.info("[CMD] /clear - Session: %s | Historial borrado", session_id)
         return ("Historial limpiado. ¿En qué puedo ayudarte?", None)
 
     if _cmd == "/restart":
-        logger.warning("[AGENT] /restart solicitado - Session: %s (comando reservado, sin acción)", session_id)
+        logger.warning("[CMD] /restart - Session: %s | Comando reservado, sin acción", session_id)
         return ("Este comando está reservado para administradores.", None)
 
     if session_id is None or session_id < 0:
