@@ -90,7 +90,7 @@ El agente **no** modifica ni cancela citas (operación no implementada). No gest
 │   (LangChain 1.2+)  │◄────────►│                                    │
 │   response_format=  │          │ check_availability(date, time?)    │
 │   CitaStructured    │          │   └─ ScheduleValidator             │
-│   Response          │          │       ├─ get_horario() [cache]     │
+│   Response          │          │       ├─ _fetch_horario() [API]    │
 └─────────────────────┘          │       └─ SUGERIR_HORARIOS /        │
                                  │          CONSULTAR_DISPONIBILIDAD  │
                                  │                                    │
@@ -577,7 +577,7 @@ El system prompt es la "personalidad" del agente para cada empresa. Se construye
 
 ```python
 results = await asyncio.gather(
-    fetch_horario_reuniones(id_empresa),          # Horario semana (cache TTL SCHEDULE_CACHE_TTL_MINUTES)
+    fetch_horario_reuniones(id_empresa),          # Horario semana (sin cache propio, cacheado en agente)
     fetch_nombres_productos_servicios(id_empresa), # Lista de nombres de productos/servicios (cache 1h)
     fetch_contexto_negocio(id_empresa),            # Descripción, misión, valores, contexto (cache 1h)
     fetch_preguntas_frecuentes(id_chatbot),        # FAQs (Pregunta/Respuesta) (cache 1h)
@@ -604,21 +604,16 @@ results = await asyncio.gather(
 
 ## 8. Estrategia de caché
 
-El agente usa **4 capas de caché** independientes, con TTLs distintos según la frecuencia de cambio de cada dato.
+El agente usa **2 caches TTL** independientes. Horarios, contexto de negocio y FAQs no tienen cache propio — se obtienen de la API al construir el agente y quedan cacheados dentro del agente compilado.
 
 | Caché | Módulo | Clave | Maxsize | TTL | Propósito |
 |-------|--------|-------|---------|-----|-----------|
-| `_agent_cache` | `agent/agent.py` | `(id_empresa,)` | 500 | `AGENT_CACHE_TTL_MINUTES` (60 min) | Agente compilado (grafo LangGraph + system prompt) |
-| `_horario_cache` | `prompt_data/horario_reuniones.py` | `id_empresa` | 500 | `SCHEDULE_CACHE_TTL_MINUTES` (5 min) | Horario de reuniones por empresa |
-| `_contexto_cache` | `prompt_data/contexto_negocio.py` | `id_empresa` | 500 | 1 hora | Descripción y contexto de la empresa |
-| `_preguntas_cache` | `prompt_data/preguntas_frecuentes.py` | `id_chatbot` | 500 | 1 hora | FAQs del chatbot |
-| `_busqueda_cache` | `busqueda_productos.py` | `(id_empresa, busqueda)` | 2000 | 15 min | Resultados de búsqueda de productos/servicios |
+| `_agent_cache` | `agent/agent.py` | `(id_empresa,)` | 500 | `AGENT_CACHE_TTL_MINUTES` (60 min) | Agente compilado (grafo LangGraph + system prompt con horarios, contexto, FAQs) |
+| `_busqueda_cache` | `busqueda_productos.py` | `(id_empresa, busqueda)` | 2000 | `SEARCH_CACHE_TTL_MINUTES` (15 min) | Resultados de búsqueda de productos/servicios |
 
-### Por qué dos TTLs distintos para agente y horario
+### Por qué el ScheduleValidator no usa el cache del agente
 
-El system prompt incluye el horario de atención. Si `SCHEDULE_CACHE_TTL_MINUTES = 5 min` y `AGENT_CACHE_TTL_MINUTES = 60 min`, el agente compilado usaría el horario viejo durante 60 min aunque el horario del negocio haya cambiado.
-
-**Solución:** `ScheduleValidator.validate()` llama directamente a `_fetch_horario()` (sin cache, directo a la API), sin pasar por el system prompt. Esto garantiza que la validación final antes de crear el evento siempre use datos frescos, independientemente del TTL del agente.
+El system prompt incluye el horario de atención (cacheado 60 min). Pero `ScheduleValidator.validate()` llama directamente a `_fetch_horario()` (sin cache, directo a la API) para cada validación de cita. Esto garantiza que la validación final antes de crear el evento siempre use datos frescos, independientemente del TTL del agente.
 
 ### Thundering herd prevention
 
@@ -779,8 +774,8 @@ Procesa un mensaje del cliente y devuelve la respuesta del agente.
   "context": {
     "config": {
       "id_empresa": "integer (requerido)",
-      "usuario_id": "integer (opcional, default: 1)",
-      "correo_usuario": "string (opcional, default: '')",
+      "usuario_id": "integer (opcional, default: None — requerido para crear cita)",
+      "correo_usuario": "string (opcional, default: None — requerido para crear cita)",
       "personalidad": "string (opcional, default: 'amable, profesional y eficiente')",
       "duracion_cita_minutos": "integer (opcional, default: 60)",
       "slots": "integer (opcional, default: 60)",
@@ -796,11 +791,11 @@ Procesa un mensaje del cliente y devuelve la respuesta del agente.
 ```json
 {
   "reply": "¡Perfecto, María! Tu cita está confirmada para el viernes 28 de febrero a las 3:00 PM...",
-  "url": "https://meet.google.com/abc-defg-hij"
+  "url": null
 }
 ```
 
-`url` es `null` cuando no hay Google Meet link. Siempre presente en el JSON.
+`url` es solo para `archivo_saludo` en el primer mensaje de la conversación. Los enlaces de Google Meet van en el texto de `reply`. Siempre presente en el JSON.
 
 **Response 200 (error de negocio):**
 
@@ -867,9 +862,11 @@ Métricas Prometheus en formato text/plain. Diseñado para ser scrapeado por Pro
 | `HTTP_RETRY_ATTEMPTS` | ❌ | `3` | 1–10 | Reintentos ante fallo de red |
 | `HTTP_RETRY_WAIT_MIN` | ❌ | `1` | 0–30 seg | Espera mínima entre reintentos |
 | `HTTP_RETRY_WAIT_MAX` | ❌ | `4` | 1–60 seg | Espera máxima entre reintentos |
-| `SCHEDULE_CACHE_TTL_MINUTES` | ❌ | `5` | 1–1440 min | TTL del cache de horarios de reunión |
 | `AGENT_CACHE_TTL_MINUTES` | ❌ | `60` | 5–1440 min | TTL del agente compilado (system prompt) |
 | `AGENT_CACHE_MAXSIZE` | ❌ | `500` | 10–5000 | Máximo de agentes cacheados (por id_empresa) |
+| `SEARCH_CACHE_TTL_MINUTES` | ❌ | `15` | 1–60 min | TTL del cache de búsqueda de productos |
+| `SEARCH_CACHE_MAXSIZE` | ❌ | `2000` | 10–10000 | Máximo de entradas en cache de búsqueda |
+| `MAX_MESSAGES_HISTORY` | ❌ | `20` | 4–200 | Ventana de mensajes enviados al LLM |
 | `CB_THRESHOLD` | ❌ | `3` | 1–20 | Errores de red consecutivos para abrir el circuit breaker |
 | `CB_RESET_TTL` | ❌ | `300` | 60–3600 seg | Tiempo de auto-reset del circuit breaker |
 | `LOG_LEVEL` | ❌ | `INFO` | DEBUG/INFO/WARNING/ERROR/CRITICAL | Nivel de logging |
@@ -932,7 +929,7 @@ Fuente de verdad de datos de la empresa. Protegida por `informacion_cb` keyed po
 ```
 
 **Uso:** Sistema prompt (formateado como lista por día) + `ScheduleValidator.validate()` (pasos 5-11).
-**Cache:** `_horario_cache` — TTL `SCHEDULE_CACHE_TTL_MINUTES` (5 min).
+**Cache:** Sin cache propio — se obtiene al construir el agente (cacheado por `AGENT_CACHE_TTL_MINUTES`, 60 min). El `ScheduleValidator` llama directo a la API.
 
 #### `OBTENER_CONTEXTO_NEGOCIO`
 
@@ -945,7 +942,7 @@ Fuente de verdad de datos de la empresa. Protegida por `informacion_cb` keyed po
 ```
 
 **Uso:** Inyectado en el system prompt (sección "Información del negocio").
-**Cache:** `_contexto_cache` — TTL 1 hora.
+**Cache:** Sin cache propio — se obtiene al construir el agente (cacheado por `AGENT_CACHE_TTL_MINUTES`, 60 min).
 
 #### `OBTENER_PRODUCTOS_CITAS` / `OBTENER_SERVICIOS_CITAS`
 
@@ -1124,7 +1121,7 @@ Pregunta: ¿Cuál es el horario de atención?
 Respuesta: De lunes a viernes de 9am a 6pm
 ```
 
-**Cache:** `_preguntas_cache` — TTL 1 hora por `id_chatbot`.
+**Cache:** Sin cache propio — se obtiene al construir el agente (cacheado por `AGENT_CACHE_TTL_MINUTES`, 60 min).
 
 ---
 
@@ -1191,10 +1188,10 @@ agent_citas/
 │   │   ├── __init__.py                # Re-exports de todos los subdirectorios (compatibilidad)
 │   │   ├── busqueda_productos.py      # buscar_productos_servicios() para tool (TTLCache 15min)
 │   │   │
-│   │   ├── prompt_data/               # Fetchers de datos para el system prompt
-│   │   │   ├── contexto_negocio.py    # fetch_contexto_negocio() con TTLCache + fetch lock
+│   │   ├── prompt_data/               # Fetchers de datos para el system prompt (sin cache propio)
+│   │   │   ├── contexto_negocio.py    # fetch_contexto_negocio() — descripción del negocio
 │   │   │   ├── horario_reuniones.py   # fetch_horario_reuniones() + format para prompt
-│   │   │   ├── preguntas_frecuentes.py # fetch_preguntas_frecuentes() con TTLCache + fetch lock
+│   │   │   ├── preguntas_frecuentes.py # fetch_preguntas_frecuentes() — FAQs por id_chatbot
 │   │   │   ├── productos_servicios_citas.py # fetch nombres productos/servicios para prompt
 │   │   │   └── __init__.py
 │   │   │
@@ -1222,6 +1219,63 @@ agent_citas/
 ├── .env.example
 └── README.md
 ```
+
+### Grafo de dependencias
+
+Módulos organizados por nivel de abstracción — cada nivel solo importa del nivel inferior.
+
+```
+config/config.py                          (nivel 0 — sin dependencias internas)
+   ↑
+   ├── logger.py                           (nivel 1)
+   ├── metrics.py                          (nivel 1)
+   └── config/__init__.py                  (nivel 1 — re-exporta variables)
+            ↑
+            ├── tool/validation.py                        (nivel 2)
+            ├── infra/http_client.py                      (nivel 2 — tenacity retry)
+            ├── infra/circuit_breaker.py                   (nivel 2 — 4 CB singletons)
+            │       ↑
+            │   infra/_resilience.py                       (nivel 2.5 — resilient_call)
+            │       ↑
+            │   ┌───┴──────────────────────────────────────────┐
+            │   ├── services/prompt_data/contexto_negocio.py   │
+            │   ├── services/prompt_data/horario_reuniones.py  │
+            │   ├── services/prompt_data/preguntas_frecuentes.py│
+            │   ├── services/prompt_data/productos_servicios.py│
+            │   ├── services/scheduling/schedule_validator.py  │
+            │   ├── services/scheduling/schedule_recommender.py│
+            │   ├── services/scheduling/availability_client.py │
+            │   ├── services/scheduling/booking.py             │
+            │   └── services/busqueda_productos.py             │
+            │                           (nivel 3)              │
+            └──────────────────────────────────────────────────┘
+                            ↑
+                    tool/tools.py            (nivel 4)
+                            ↑
+                    agent/prompts/           (nivel 4, paralelo)
+                            ↑
+                    agent/agent.py           (nivel 5)
+                            ↑
+                    main.py                  (nivel 6)
+                            ↑
+                    Gateway Go (externo)
+```
+
+### Patrones de diseño
+
+| Patrón | Dónde | Propósito |
+|--------|-------|-----------|
+| **Factory + Cache** | `agent/agent.py` (`_get_agent`) | Agente compilado por empresa, evita recreación |
+| **Double-Checked Locking** | `agent/agent.py`, `busqueda_productos.py` | Serializar primera creación sin bloquear hot path |
+| **Singleton** | `infra/http_client.py`, `agent/agent.py` (`_model`) | Connection pool y modelo LLM compartidos |
+| **Circuit Breaker** | `infra/circuit_breaker.py` (4 CBs) | Protege ante APIs inestables, auto-reset por TTL |
+| **Resilient Call** | `infra/_resilience.py` | Wrapper: CB check → execute → record success/failure |
+| **Retry + Backoff** | `infra/http_client.py` (tenacity) | Configurable: intentos, espera min/max |
+| **Runtime Context Injection** | `tool/tools.py` (LangChain 1.2+) | AgentContext inyectado en tools sin parámetros explícitos |
+| **Graceful Degradation** | `scheduling/schedule_validator.py`, `tool/tools.py` | Si falla API no crítica, continúa con fallback |
+| **Strategy** (validación) | `tool/tools.py` (`create_booking`) | 3 capas secuenciales independientes |
+| **Observer** | `metrics.py` | Context managers trackean sin modificar lógica de negocio |
+| **Template Method** | `agent/prompts/citas_system.j2` | Estructura del prompt fija, variables inyectadas |
 
 ---
 

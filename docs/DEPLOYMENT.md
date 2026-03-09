@@ -1,4 +1,4 @@
-# Deployment Guide — Agent Citas v2.0.0
+# Deployment Guide — Agent Citas
 
 Guia completa para desplegar el agente de citas en local, Docker y Easypanel (produccion).
 
@@ -33,11 +33,11 @@ Guia completa para desplegar el agente de citas en local, Docker y Easypanel (pr
 
 ## Ejecucion Local
 
-### 1. Crear entorno virtual e instalar dependencias
+### 1. Crear entorno virtual e instalar paquete
 
 ```bash
-# Crear entorno virtual
-python -m venv venv_agent_citas
+# Crear entorno virtual con uv
+uv venv venv_agent_citas
 
 # Activar — Windows
 venv_agent_citas\Scripts\activate
@@ -45,8 +45,8 @@ venv_agent_citas\Scripts\activate
 # Activar — Linux/Mac
 source venv_agent_citas/bin/activate
 
-# Instalar dependencias
-pip install -r requirements.txt
+# Instalar paquete y dependencias (desde pyproject.toml)
+uv pip install .
 ```
 
 ### 2. Configurar variables de entorno
@@ -60,22 +60,7 @@ cp .env.example .env
 
 El servidor buscara el archivo `.env` hacia arriba en el arbol de directorios (hasta 6 niveles), por lo que puede estar en el directorio del proyecto o en un directorio padre.
 
-### 3. Configurar PYTHONPATH
-
-El codigo fuente vive en `src/`. Para que Python encuentre el modulo `citas` fuera de Docker:
-
-```bash
-# Linux/Mac
-export PYTHONPATH=$(pwd)/src
-
-# Windows (PowerShell)
-$env:PYTHONPATH = "$(Get-Location)\src"
-
-# Windows (CMD)
-set PYTHONPATH=%CD%\src
-```
-
-### 4. Arrancar el servidor
+### 3. Arrancar el servidor
 
 ```bash
 # Modo normal
@@ -271,19 +256,25 @@ WORKDIR /app
 
 # Usuario no privilegiado (UID 10001, sin home, sin shell)
 ARG UID=10001
-RUN adduser --disabled-password --gecos "" \
-    --home "/nonexistent" --shell "/sbin/nologin" \
-    --no-create-home --uid "${UID}" appuser
+RUN adduser \
+    --disabled-password \
+    --gecos "" \
+    --home "/nonexistent" \
+    --shell "/sbin/nologin" \
+    --no-create-home \
+    --uid "${UID}" \
+    appuser
 
-# Dependencias (capa separada para cache de Docker)
-COPY requirements.txt .
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --no-cache-dir -r requirements.txt
+# Instalar uv (gestor de paquetes rápido)
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+# Instalar paquete (pyproject.toml + src/)
+COPY pyproject.toml .
+COPY src ./src
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system .
 
 USER appuser
-
-COPY src ./src
-ENV PYTHONPATH=/app/src
 
 EXPOSE 8002
 
@@ -293,7 +284,8 @@ CMD ["python", "-m", "citas.main"]
 **Caracteristicas de seguridad del Dockerfile:**
 - Usuario no privilegiado (`appuser`, UID 10001)
 - Sin home directory ni shell de login
-- Solo copia `src/` (codigo) y `requirements.txt` (dependencias)
+- Solo copia `pyproject.toml` y `src/` (paquete instalable)
+- `uv` como package manager (rápido, cache eficiente)
 - `.dockerignore` excluye `.env`, `.git`, `docs/`, `venv*`, `logs/`
 
 ### Construir la imagen
@@ -302,7 +294,7 @@ CMD ["python", "-m", "citas.main"]
 docker build -t agent-citas:latest .
 
 # Con tag de version
-docker build -t agent-citas:2.0.0 .
+docker build -t agent-citas:2.5.0 .
 ```
 
 ### Ejecutar con Docker directamente
@@ -336,17 +328,11 @@ services:
     env_file:
       - .env
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/health')"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 15s
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-          cpus: "1.0"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 ```
 
 ```bash
@@ -362,7 +348,7 @@ docker compose down
 
 ### `.dockerignore`
 
-El archivo `.dockerignore` excluye: `__pycache__`, `.venv`/`venv`/`venv_agent_citas`, `.env`, `.git`, `docs/`, `logs/`, `*.md`, `Dockerfile`, `compose.yaml`, `.pytest_cache`, `.coverage`. La imagen final solo contiene `src/` y `requirements.txt`.
+El archivo `.dockerignore` excluye: `__pycache__`, `.venv`/`venv`/`venv_agent_citas`, `.env`, `.git`, `docs/`, `logs/`, `*.md`, `Dockerfile`, `compose.yaml`, `.pytest_cache`, `.coverage`. La imagen final solo contiene `pyproject.toml` y `src/`.
 
 ---
 
@@ -447,12 +433,12 @@ curl http://localhost:8002/health
 
 Respuesta esperada (HTTP 200):
 ```json
-{"status": "ok", "agent": "citas", "version": "2.0.0", "issues": []}
+{"status": "ok", "agent": "citas", "version": "2.5.0", "issues": []}
 ```
 
 Respuesta degradada (HTTP 503):
 ```json
-{"status": "degraded", "agent": "citas", "version": "2.0.0", "issues": ["informacion_api_degraded"]}
+{"status": "degraded", "agent": "citas", "version": "2.5.0", "issues": ["informacion_api_degraded"]}
 ```
 
 **Issues posibles:**
@@ -497,7 +483,7 @@ curl http://localhost:8002/metrics | grep agent_citas
 Deberia mostrar contadores como:
 ```
 agent_citas_chat_requests_total{empresa_id="123"} 1
-agent_citas_info{agent_type="citas",model="gpt-4o-mini",version="2.0.0"} 1
+agent_citas_info{agent_type="citas",model="gpt-4o-mini",version="2.5.0"} 1
 ```
 
 ```bash
@@ -621,22 +607,6 @@ grep SERVER_PORT .env
 
 ---
 
-### `ModuleNotFoundError: No module named 'citas'`
-
-**Causa:** `PYTHONPATH` no apunta a `src/`.
-
-```bash
-# Verificar
-echo $PYTHONPATH   # debe contener /ruta/al/proyecto/src
-
-# Corregir (Linux/Mac)
-export PYTHONPATH=$(pwd)/src
-
-# En Docker no ocurre: el Dockerfile define ENV PYTHONPATH=/app/src
-```
-
----
-
 ### Latencia alta (>5s por respuesta)
 
 **Causas posibles y diagnostico:**
@@ -666,7 +636,7 @@ curl -s http://localhost:8002/metrics | grep -E "llm_call|chat_response"
 
 ```bash
 # Verificar que la key esta cargada (local)
-PYTHONPATH=src python -c "from citas.config import config; print(bool(config.OPENAI_API_KEY))"
+python -c "from citas.config import config; print(bool(config.OPENAI_API_KEY))"
 
 # En Docker
 docker exec agent-citas python -c "from citas.config import config; print(bool(config.OPENAI_API_KEY))"
@@ -727,70 +697,7 @@ Los circuit breakers se auto-resetean despues de `CB_RESET_TTL` segundos (defaul
 
 ### Migracion a checkpointer persistente (Redis)
 
-Redis (`memori_agentes`) ya existe en Easypanel. La migracion resuelve los 3 problemas de la tabla anterior.
-
-**Paso 1 — Instalar dependencia:**
-
-```bash
-pip install langgraph-checkpoint-redis
-```
-
-Agregar a `requirements.txt`:
-```
-langgraph-checkpoint-redis>=0.1.0
-```
-
-**Paso 2 — Configurar `REDIS_URL`:**
-
-```bash
-# Easypanel (hostname interno de Docker Compose)
-REDIS_URL=redis://memori_agentes:6379
-
-# Local
-REDIS_URL=redis://localhost:6379
-```
-
-`REDIS_URL` ya esta definida en `config/config.py` (vacia por defecto).
-
-**Paso 3 — Modificar `agent/agent.py`:**
-
-```python
-# Antes:
-from langgraph.checkpoint.memory import InMemorySaver
-_checkpointer = InMemorySaver()
-
-# Despues:
-from langgraph.checkpoint.redis.aio import AsyncRedisSaver
-
-_checkpointer: AsyncRedisSaver | None = None
-
-async def _get_checkpointer() -> AsyncRedisSaver:
-    global _checkpointer
-    if _checkpointer is None:
-        _checkpointer = AsyncRedisSaver.from_conn_string(
-            app_config.REDIS_URL,
-            ttl={"default_ttl": 86400},  # 24 horas
-        )
-        await _checkpointer.asetup()  # crea indices la primera vez
-    return _checkpointer
-```
-
-Luego en `_get_agent()`:
-```python
-checkpointer = await _get_checkpointer()
-agent = create_agent(
-    model=model,
-    tools=AGENT_TOOLS,
-    system_prompt=system_prompt,
-    checkpointer=checkpointer,
-    response_format=CitaStructuredResponse,
-)
-```
-
-**Beneficios tras la migracion:**
-- Historial persiste si el container se reinicia (deploy, crash)
-- TTL 24h: sesiones inactivas se eliminan automaticamente
-- Preparado para escalar a multiples instancias del agente
+Redis (`memori_agentes`) ya existe en Easypanel. La migracion resuelve los 3 problemas de la tabla anterior. Ver [PENDIENTES.md](PENDIENTES.md) sección C1 para el código de implementación completo con fallback automático.
 
 ### Workers de Uvicorn
 
@@ -841,7 +748,8 @@ Para 50 empresas activas simultaneamente: ~150-300 MB solo en agentes + caches. 
 | Usuario no privilegiado | `appuser` (UID 10001), sin home, sin shell |
 | Sin secretos en imagen | `.env` excluido via `.dockerignore` |
 | Imagen slim | `python:3.12-slim` (sin compiladores ni tools innecesarios) |
-| Read-only code | El codigo en `/app/src` es propiedad de root, `appuser` solo puede leer |
+| Package manager rápido | `uv` (instalado desde imagen oficial, cache eficiente) |
+| Read-only code | El codigo instalado como paquete, `appuser` solo puede leer |
 | No PYTHONDONTWRITEBYTECODE | Evita escritura de `.pyc` en el filesystem |
 
 ### Pendiente de implementar
@@ -859,8 +767,8 @@ Para 50 empresas activas simultaneamente: ~150-300 MB solo en agentes + caches. 
 
 ```bash
 # ── Local ─────────────────────────────────────────────────
-PYTHONPATH=src python -m citas.main              # arrancar
-LOG_LEVEL=DEBUG PYTHONPATH=src python -m citas.main  # debug
+python -m citas.main              # arrancar
+LOG_LEVEL=DEBUG python -m citas.main  # debug
 
 # ── Docker ────────────────────────────────────────────────
 docker build -t agent-citas:latest .             # construir
@@ -881,7 +789,7 @@ curl -s http://localhost:8002/metrics | grep citas_http
 curl -s http://localhost:8002/metrics | grep booking
 
 # ── Version ───────────────────────────────────────────────
-PYTHONPATH=src python -c "from citas import __version__; print(__version__)"
+python -c "from citas import __version__; print(__version__)"
 ```
 
 ---
@@ -889,6 +797,4 @@ PYTHONPATH=src python -c "from citas import __version__; print(__version__)"
 ## Proximos Pasos
 
 - [API.md](API.md) — referencia completa del endpoint `/api/chat`
-- [ARCHITECTURE.md](ARCHITECTURE.md) — arquitectura interna del agente
-- [MEMORY_PROFILE.md](MEMORY_PROFILE.md) — analisis detallado de consumo de RAM por componente
-- [PENDIENTES.md](PENDIENTES.md) — roadmap tecnico (Redis, auth, trim_messages, tests)
+- [PENDIENTES.md](PENDIENTES.md) — roadmap tecnico (Redis, auth, tests)

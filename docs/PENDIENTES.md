@@ -24,87 +24,121 @@ El `session_id` en WhatsApp es permanente por contacto y nunca cambia → la RAM
 indefinidamente mientras el proceso esté vivo. Con 50–200 empresas y múltiples contactos
 activos esto eventualmente agota la memoria del container.
 
-**Solución: migrar a `AsyncRedisSaver` con TTL de 24 horas.**
+**Solución: migrar a `AsyncRedisSaver` con TTL de 24 horas y fallback automático a InMemorySaver.**
 
-> ⚠️ **Implementado en commit `ed47eae` y revertido (2026-03-05).** El código fue documentado en `docs/cambios_solid2_c1.md`. Pendiente re-implementar cuando Redis Stack esté confirmado en Easypanel y `REDIS_URL` configurado.
+> ⚠️ **Implementado en commit `ed47eae` y revertido (2026-03-05).** Pendiente re-implementar cuando Redis Stack esté confirmado en Easypanel y `REDIS_URL` configurado.
 
-Redis (`memori_agentes` en Easypanel) ya existe. Solo falta configurarlo.
+**Infraestructura requerida:**
+- Redis Stack (imagen `redis/redis-stack-server:latest`) — requiere módulos RedisJSON y RediSearch
+- Redis estándar (7.x u 8.x) NO tiene estos módulos
+- Redis (`memori_agentes` en Easypanel) ya existe. Solo falta configurarlo.
 
 #### Paso 1 — Instalar dependencia
 
-```bash
-pip install langgraph-checkpoint-redis
-```
-
-Agregar a `requirements.txt`:
-```
-langgraph-checkpoint-redis>=0.1.0
+Agregar a `pyproject.toml`:
+```toml
+"langgraph-checkpoint-redis>=0.3.0",
 ```
 
 #### Paso 2 — Configurar `REDIS_URL` en Easypanel
 
-En las variables de entorno del servicio `agente_citas`:
 ```
 REDIS_URL=redis://memori_agentes:6379
 ```
 
-El nombre `memori_agentes` es el hostname interno de Docker Compose en Easypanel.
-`REDIS_URL` ya está leída en `config/config.py` (línea 105), no hay que agregarla.
+`REDIS_URL` ya está leída en `config/config.py`, no hay que agregarla.
 
 #### Paso 3 — Modificar `agent/agent.py`
 
-Reemplazar `InMemorySaver` por `AsyncRedisSaver`:
+Reemplazar el checkpointer estático por init/close con fallback:
 
 ```python
-# Antes:
-from langgraph.checkpoint.memory import InMemorySaver
-_checkpointer = InMemorySaver()
+# Valor inicial: InMemorySaver. init_checkpointer() lo reemplaza
+# por AsyncRedisSaver si REDIS_URL está configurado y la conexión tiene éxito.
+_checkpointer: Any = InMemorySaver()
+_checkpointer_ctx: Any = None  # Context manager de AsyncRedisSaver (para close)
 
-# Después:
-import os
-from langgraph.checkpoint.redis.aio import AsyncRedisSaver
 
-# El TTL de 86400 segundos (24h) elimina automáticamente el historial de cada sesión
-# pasado un día de inactividad — mismo criterio que N8N/WhatsApp.
-_checkpointer: AsyncRedisSaver | None = None
+async def init_checkpointer() -> None:
+    """
+    Inicializa el checkpointer LangGraph.
+    Si REDIS_URL está configurado, intenta usar AsyncRedisSaver (TTL 24 h,
+    refresh_on_read=True). Si Redis no está disponible o el paquete no está
+    instalado, mantiene InMemorySaver como fallback sin lanzar excepciones.
+    Debe llamarse una sola vez al arrancar la app (FastAPI lifespan).
+    """
+    global _checkpointer, _checkpointer_ctx
 
-async def _get_checkpointer() -> AsyncRedisSaver:
-    global _checkpointer
-    if _checkpointer is None:
-        _checkpointer = AsyncRedisSaver.from_conn_string(
+    if not app_config.REDIS_URL:
+        logger.info("[AGENT] REDIS_URL no configurado — usando InMemorySaver")
+        return
+
+    try:
+        from langgraph.checkpoint.redis.aio import AsyncRedisSaver
+
+        ctx = AsyncRedisSaver.from_conn_string(
             app_config.REDIS_URL,
-            ttl={"default_ttl": 86400},  # 24 horas en segundos
+            ttl={"default_ttl": 1440, "refresh_on_read": True},
         )
-        await _checkpointer.asetup()  # crea índices la primera vez
-    return _checkpointer
+        checkpointer = await ctx.__aenter__()
+        await checkpointer.asetup()
+        _checkpointer = checkpointer
+        _checkpointer_ctx = ctx
+        logger.info("[AGENT] AsyncRedisSaver inicializado (TTL 24 h, refresh_on_read=True)")
+
+    except ImportError:
+        logger.warning("[AGENT] langgraph-checkpoint-redis no instalado — usando InMemorySaver")
+    except Exception as e:
+        logger.warning("[AGENT] No se pudo conectar a Redis (%s) — usando InMemorySaver", e)
+
+
+async def close_checkpointer() -> None:
+    """Cierra AsyncRedisSaver al apagar la app. No-op si usa InMemorySaver."""
+    global _checkpointer_ctx
+    if _checkpointer_ctx is None:
+        return
+    try:
+        await _checkpointer_ctx.__aexit__(None, None, None)
+        logger.info("[AGENT] AsyncRedisSaver cerrado correctamente")
+    except Exception as e:
+        logger.warning("[AGENT] Error cerrando Redis checkpointer: %s", e)
+    finally:
+        _checkpointer_ctx = None
 ```
 
-Luego en `_get_agent()` cambiar:
+#### Paso 4 — Modificar `agent/__init__.py`
+
 ```python
-# Antes:
-agent = create_agent(
-    model=model,
-    tools=AGENT_TOOLS,
-    system_prompt=system_prompt,
-    checkpointer=_checkpointer,
-    response_format=CitaStructuredResponse,
-)
-
-# Después:
-checkpointer = await _get_checkpointer()
-agent = create_agent(
-    model=model,
-    tools=AGENT_TOOLS,
-    system_prompt=system_prompt,
-    checkpointer=checkpointer,
-    response_format=CitaStructuredResponse,
-)
+from .agent import process_cita_message, init_checkpointer, close_checkpointer
+__all__ = ["process_cita_message", "init_checkpointer", "close_checkpointer"]
 ```
+
+#### Paso 5 — Modificar `main.py` (lifespan)
+
+```python
+from .agent import process_cita_message, init_checkpointer, close_checkpointer
+
+@asynccontextmanager
+async def app_lifespan(app: FastAPI):
+    await init_checkpointer()
+    try:
+        yield
+    finally:
+        await close_checkpointer()
+        await close_http_client()
+```
+
+#### Pasos para activar en producción
+
+1. Agregar dep a `pyproject.toml`: `langgraph-checkpoint-redis>=0.3.0`
+2. Desplegar Redis Stack en Easypanel: imagen `redis/redis-stack-server:latest`
+3. Configurar variable: `REDIS_URL=redis://memori_agentes:6379`
 
 #### Beneficios tras la migración
 
 - Historial persiste si el container se reinicia (deploy, crash)
 - TTL 24h: sesiones inactivas se eliminan automáticamente
+- Fallback automático: si Redis cae, sigue con InMemorySaver
 - Preparado para escalar a múltiples instancias del agente
 
 ---
@@ -253,6 +287,14 @@ No existe suite de tests. Las áreas más importantes a cubrir:
 - `agent/agent.py` — `_validate_context`, `_prepare_agent_context`
 - `services/schedule_validator.py` — validación de horarios y slots
 
+### Formato futuro: respuesta reply + url con imagen de producto
+
+Cuando la tool de búsqueda de productos/servicios devuelva URL de imagen, el campo `url` de `CitaStructuredResponse` podrá usarse para adjuntar la imagen al mensaje de WhatsApp.
+
+Reglas pendientes de implementar en el prompt:
+- `url` de saludo (`archivo_saludo`): solo en el primer mensaje de la conversación.
+- `url` de producto: solo cuando el usuario eligió un producto concreto y la tool devolvió URL. Si mostró varios y el usuario no eligió, dejar `url` vacío.
+
 ### Streaming
 
 Actualmente el gateway espera la respuesta completa antes de enviarla al cliente.
@@ -269,7 +311,7 @@ Requiere cambios en el gateway Go para consumir SSE y retransmitir a N8N/WhatsAp
 ✅ M1 — trim_messages implementado (wrap_model_call en agent.py)
 
 Antes de producción con carga real:
-  ⏸️  C1 — AsyncRedisSaver (implementado/revertido, ver cambios_solid2_c1.md)
+  ⏸️  C1 — AsyncRedisSaver (implementado/revertido, código de referencia arriba)
   ⚠️  C2 — Auth X-Internal-Token
 
 Después:

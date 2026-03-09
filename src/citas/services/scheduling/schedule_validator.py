@@ -64,7 +64,8 @@ class ScheduleValidator:
             degradation_total.labels(service="schedule_fetch", reason="circuit_open").inc()
         except httpx.TransportError:
             degradation_total.labels(service="schedule_fetch", reason="transport_error").inc()
-        except Exception:
+        except Exception as e:
+            logger.warning("[SCHEDULE] Error inesperado en _fetch_horario: %s", e)
             degradation_total.labels(service="schedule_fetch", reason="unknown").inc()
         return None
 

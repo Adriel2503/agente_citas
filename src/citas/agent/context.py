@@ -95,7 +95,10 @@ def _prepare_agent_context(context: dict[str, Any], session_id: int) -> AgentCon
 
     # usuario_id: ID real del usuario/vendedor (para CREAR_EVENTO en ws_calendario)
     if "usuario_id" in config_data and config_data["usuario_id"] is not None:
-        context_params["usuario_id"] = int(config_data["usuario_id"])
+        try:
+            context_params["usuario_id"] = int(config_data["usuario_id"])
+        except (ValueError, TypeError):
+            logger.warning("[CONTEXT] usuario_id inválido: %r — ignorando", config_data["usuario_id"])
 
     # correo_usuario: email del vendedor (para CREAR_EVENTO)
     if "correo_usuario" in config_data and config_data["correo_usuario"] is not None:

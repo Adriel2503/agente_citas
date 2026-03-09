@@ -1,4 +1,4 @@
-# API Reference — Agent Citas v2.0.0
+# API Reference — Agent Citas
 
 Referencia completa de la API HTTP del agente especializado en citas y reuniones comerciales.
 
@@ -69,8 +69,8 @@ Content-Type: application/json
 | Campo | Tipo | Requerido | Default | Uso | Descripción |
 |-------|------|-----------|---------|-----|-------------|
 | `id_empresa` | integer | ✅ Sí | — | Tools + Prompt | ID de la empresa. Determina horarios, contexto y catálogo |
-| `usuario_id` | integer | ❌ No | `1` | CREAR_EVENTO | ID del vendedor (campo `usuario_id` en payload del calendario) |
-| `correo_usuario` | string | ❌ No | `""` | CREAR_EVENTO | Email del vendedor (invitación Google Calendar) |
+| `usuario_id` | integer | ❌ No | `None` | CREAR_EVENTO | ID del vendedor (campo `usuario_id` en payload del calendario). Requerido para crear cita |
+| `correo_usuario` | string | ❌ No | `None` | CREAR_EVENTO | Email del vendedor (invitación Google Calendar). Requerido para crear cita |
 | `personalidad` | string | ❌ No | `"amable, profesional y eficiente"` | Prompt | Tono/personalidad del agente |
 | `nombre_bot` | string | ❌ No | `"Asistente"` | Prompt | Nombre con el que el agente se presenta |
 | `frase_saludo` | string | ❌ No | `"¡Hola! ¿En qué puedo ayudarte?"` | Prompt | Saludo inicial |
@@ -136,8 +136,8 @@ Content-Type: application/json
 **Respuesta con Google Meet (después de crear cita):**
 ```json
 {
-  "reply": "¡Tu cita está confirmada! ...",
-  "url": "https://meet.google.com/abc-defg-hij"
+  "reply": "¡Tu cita está confirmada! ... Enlace: https://meet.google.com/abc-defg-hij",
+  "url": null
 }
 ```
 
@@ -151,10 +151,12 @@ Content-Type: application/json
 
 | Campo | Tipo | Siempre presente | Descripción |
 |-------|------|-----------------|-------------|
-| `reply` | string | ✅ Sí | Respuesta del agente en lenguaje natural (formato WhatsApp) |
-| `url` | string \| null | ✅ Sí | URL de adjunto: Google Meet link, imagen de saludo, o `null` |
+| `reply` | string | ✅ Sí | Respuesta del agente en lenguaje natural (formato WhatsApp). Incluye enlaces Meet como texto |
+| `url` | string \| null | ✅ Sí | URL de imagen/video de saludo (`archivo_saludo`) solo en el primer mensaje. `null` en el resto |
 
-> **Importante:** El agente **siempre retorna HTTP 200**, incluso en casos de error. Los errores de configuración o timeout se devuelven como texto en el campo `reply`. El gateway Go no necesita manejar errores HTTP del agente.
+> **Importante:**
+> - El agente **siempre retorna HTTP 200**, incluso en casos de error. Los errores de configuración o timeout se devuelven como texto en el campo `reply`. El gateway Go no necesita manejar errores HTTP del agente.
+> - El campo `url` es **solo para `archivo_saludo`** en el primer mensaje de la conversación. Los enlaces de Google Meet van en el texto de `reply`, nunca en `url`.
 
 ---
 
@@ -171,7 +173,7 @@ GET /health
 {
   "status": "ok",
   "agent": "citas",
-  "version": "2.0.0",
+  "version": "2.5.0",
   "issues": []
 }
 ```
@@ -181,7 +183,7 @@ GET /health
 {
   "status": "degraded",
   "agent": "citas",
-  "version": "2.0.0",
+  "version": "2.5.0",
   "issues": ["openai_api_key_missing", "calendario_api_degraded"]
 }
 ```
@@ -190,7 +192,7 @@ GET /health
 |-------|------|-------------|
 | `status` | string | `"ok"` o `"degraded"` |
 | `agent` | string | Siempre `"citas"` |
-| `version` | string | Versión del agente (`"2.0.0"`) |
+| `version` | string | Versión del agente (dinámica desde `pyproject.toml`) |
 | `issues` | string[] | Lista de problemas detectados (vacía si todo OK) |
 
 **Issues posibles:**
@@ -290,11 +292,11 @@ Devuelve métricas en formato Prometheus text/plain. Diseñado para scraping por
 ```json
 {
   "reply": "Evento agregado correctamente.\n\n*Detalles:*\n• Fecha: 2026-02-28\n• Hora: 3:00 PM\n• Nombre: Juan Pérez\n\nLa reunión será por videollamada. Enlace: https://meet.google.com/abc-defg-hij\n\n¡Te esperamos!",
-  "url": "https://meet.google.com/abc-defg-hij"
+  "url": null
 }
 ```
 
-> **Nota:** El enlace de Google Meet es real, devuelto por `ws_calendario.php`. El LLM no lo inventa.
+> **Nota:** El enlace de Google Meet es real, devuelto por `ws_calendario.php`. El LLM no lo inventa. El enlace va en `reply` como texto, no en el campo `url`.
 
 ---
 
@@ -420,7 +422,7 @@ El agente siempre responde con HTTP 200. Los errores se comunican en texto dentr
 **Response:**
 ```json
 {
-  "reply": "Error de configuración: Context missing required keys in config: ['id_empresa']",
+  "reply": "Error de configuración: Context missing required key in config: id_empresa",
   "url": null
 }
 ```
@@ -443,14 +445,22 @@ El agente siempre responde con HTTP 200. Los errores se comunican en texto dentr
 
 ### Error: `session_id` inválido
 
-**Causa:** `session_id` es negativo o `null`.
+**Causa:** `session_id` no es un entero (ej. string, null, float).
 
-**Response:** HTTP 500 (excepción no capturada como HTTP 200):
-```
-ValueError: session_id es requerido (entero no negativo)
+**Response:** HTTP 422 (validación de Pydantic/FastAPI):
+```json
+{
+  "detail": [
+    {
+      "type": "int_parsing",
+      "loc": ["body", "session_id"],
+      "msg": "Input should be a valid integer"
+    }
+  ]
+}
 ```
 
-> **Nota:** Este es el único caso donde el agente **no** retorna HTTP 200. Un `session_id` inválido indica un bug en el gateway.
+> **Nota:** Este es el único caso donde el agente **no** retorna HTTP 200. Un `session_id` con tipo incorrecto indica un bug en el gateway.
 
 ---
 
@@ -748,7 +758,7 @@ agent_citas_llm_call_duration_seconds_bucket{status="error",le="5.0"} 2
 agent_citas_cache_entries{cache_type="schedule"} 8
 
 # Información del agente
-agent_citas_info{agent_type="citas",model="gpt-4o-mini",version="2.0.0"} 1
+agent_citas_info{agent_type="citas",model="gpt-4o-mini",version="2.5.0"} 1
 ```
 
 ---
@@ -954,9 +964,9 @@ Las tools son funciones internas que el LLM invoca vía function calling. **El g
 
 | Campo `AgentContext` | Origen | Campo en payload `CREAR_EVENTO` |
 |---------------------|--------|--------------------------------|
-| `usuario_id` | 🔧 Gateway (default 1) | `usuario_id` |
+| `usuario_id` | 🔧 Gateway (requerido) | `usuario_id` |
 | `id_prospecto` (= session_id) | ⚙️ Runtime | `id_prospecto` |
-| `correo_usuario` | 🔧 Gateway (default "") | `correo_usuario` |
+| `correo_usuario` | 🔧 Gateway (requerido) | `correo_usuario` |
 | `agendar_usuario` | 🔧 Gateway (default 1) | `agendar_usuario` |
 | `duracion_cita_minutos` | 🔧 Gateway (default 60) | Cálculo de `fecha_fin` |
 | `slots` | 🔧 Gateway (default 60) | Validación (CONSULTAR_DISPONIBILIDAD) |
@@ -965,7 +975,7 @@ Las tools son funciones internas que el LLM invoca vía function calling. **El g
 **Pipeline de 3 fases:**
 
 ```
-Fase 1 — Validación Pydantic (validation.py)
+Fase 1 — Validación Pydantic (tool/validation.py)
   ├─ date: YYYY-MM-DD, no pasado
   ├─ time: HH:MM AM/PM o HH:MM
   ├─ customer_name: ≥2 chars, sin números, sin chars peligrosos → title()
@@ -1126,7 +1136,9 @@ El system prompt instruye al agente a usar formato compatible con WhatsApp:
 
 ### Memoria conversacional
 
-La memoria es automática via `InMemorySaver` de LangGraph. El agente recuerda **toda la conversación** del mismo `session_id` sin necesidad de enviar historial. Si el servidor se reinicia, la memoria se pierde.
+La memoria es automática via `InMemorySaver` de LangGraph. El agente recuerda la conversación del mismo `session_id` sin necesidad de enviar historial. Si el servidor se reinicia, la memoria se pierde.
+
+El LLM recibe solo los últimos `MAX_MESSAGES_HISTORY` mensajes (default 20) para controlar el costo de tokens en sesiones largas. El checkpointer conserva el historial completo.
 
 ### Timeout por capas
 
@@ -1182,14 +1194,11 @@ Si una API falla, el agente no se cae — degrada funcionalidad:
 
 | Cache | TTL | Key | Maxsize | Anti-thundering herd |
 |-------|-----|-----|---------|---------------------|
-| Agente (grafo compilado) | 60 min | `(id_empresa,)` | 500 | `asyncio.Lock` + double-check |
-| Horarios | 5 min | `id_empresa` | 256 | `asyncio.Lock` + double-check |
-| Contexto negocio | 60 min | `id_empresa` | 256 | `asyncio.Lock` + double-check |
-| FAQs | 60 min | `id_chatbot` | 256 | `asyncio.Lock` + double-check |
+| Agente (grafo compilado + prompt) | 60 min | `(id_empresa,)` | 500 | `asyncio.Lock` + double-check |
 | Búsqueda productos | 15 min | `(id_empresa, busqueda)` | 2000 | `asyncio.Lock` + double-check |
 | Checkpointer (sesiones) | ∞ (sin TTL) | `session_id` | ∞ | Session lock |
 
-> **Nota:** El checkpointer `InMemorySaver` no tiene TTL ni límite. La memoria se pierde si el servidor se reinicia. Pendiente migrar a `AsyncRedisSaver` con TTL 24h (ver [PENDIENTES.md](PENDIENTES.md#c1--inmemorysaver-sin-ttl-memory-leak)).
+> **Nota:** Horarios, contexto de negocio y FAQs **no tienen cache propio** — se obtienen de la API al construir el agente y quedan cacheados dentro del agente compilado (TTL 60 min). El checkpointer `InMemorySaver` no tiene TTL ni límite; la memoria se pierde si el servidor se reinicia. Pendiente migrar a `AsyncRedisSaver` con TTL 24h (ver [PENDIENTES.md](PENDIENTES.md#c1--inmemorysaver-sin-ttl-memory-leak)).
 
 ---
 
@@ -1258,13 +1267,15 @@ Cuando el cache del agente expira (cada 60 min), el primer request de esa empres
 | `CB_THRESHOLD` | `3` | Fallos para abrir circuit (1–20) |
 | `CB_RESET_TTL` | `300` | Segundos para auto-reset (60–3600) |
 
-### Cache
+### Cache y memoria
 
 | Variable | Default | Descripción |
 |----------|---------|-------------|
-| `SCHEDULE_CACHE_TTL_MINUTES` | `5` | TTL del cache de horarios (1–1440) |
-| `AGENT_CACHE_TTL_MINUTES` | `60` | TTL del cache de agentes (5–1440) |
+| `AGENT_CACHE_TTL_MINUTES` | `60` | TTL del cache de agentes compilados (5–1440) |
 | `AGENT_CACHE_MAXSIZE` | `500` | Max agentes cacheados (10–5000) |
+| `SEARCH_CACHE_TTL_MINUTES` | `15` | TTL del cache de búsqueda de productos (1–60) |
+| `SEARCH_CACHE_MAXSIZE` | `2000` | Max entradas en cache de búsqueda (10–10000) |
+| `MAX_MESSAGES_HISTORY` | `20` | Ventana de mensajes enviados al LLM (4–200) |
 
 ### APIs MaravIA
 
@@ -1306,7 +1317,7 @@ Cuando el cache del agente expira (cada 60 min), el primer request de esa empres
 
 ---
 
-## Próximos Pasos
+## Documentación Relacionada
 
-- [ARCHITECTURE.md](ARCHITECTURE.md) — cómo funciona internamente el agente
 - [DEPLOYMENT.md](DEPLOYMENT.md) — guía de despliegue en producción
+- [PENDIENTES.md](PENDIENTES.md) — pendientes técnicos y roadmap
