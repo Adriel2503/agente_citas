@@ -1,7 +1,7 @@
 """
 Agente especializado en citas - MaravIA
 
-Versión 2.0.0 - LangChain 1.2+ API Moderna
+LangChain 1.2+ API Moderna
 
 Sistema mejorado con:
 - LangChain 1.2+ API moderna con create_agent
@@ -14,8 +14,10 @@ Sistema mejorado con:
 - Métricas y observabilidad (Prometheus)
 """
 
-__version__ = "2.0.0"
-__author__ = "MaravIA Team"
+from importlib.metadata import version as _pkg_version
+
+__version__ = _pkg_version("citas")
+__author__ = "Ariel Amado Frias Rojas"
 
 # Exportar funciones principales
 from .agent import process_cita_message

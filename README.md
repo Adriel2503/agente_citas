@@ -2,7 +2,7 @@
 
 Agente conversacional de IA especializado en la gestión de citas y reuniones comerciales. Actúa como un **closer digital 24/7** que guía a prospectos de WhatsApp hasta confirmar una reunión de venta, integrando validación real de horarios, creación de eventos en Google Calendar y soporte multiempresa.
 
-**Versión:** `2.0.0` — FastAPI HTTP + LangChain 1.2+ API moderna
+**Versión:** `2.5.0` — FastAPI HTTP + LangChain 1.2+ API moderna
 **Modelo:** `gpt-4o-mini` (configurable vía `OPENAI_MODEL`)
 **Puerto:** `8002`
 
@@ -413,7 +413,7 @@ Si NO viene time (solo fecha o pregunta general):
 **Pipeline de 3 fases:**
 
 ```
-Fase 1 — Validación de datos (Pydantic + regex en validation.py)
+Fase 1 — Validación de datos (Pydantic + regex en tool/validation.py)
   ├─ date: formato YYYY-MM-DD, no en el pasado
   ├─ time: HH:MM AM/PM o HH:MM 24h
   ├─ customer_name: ≥2 chars, sin números, solo letras/espacios/acentos
@@ -651,7 +651,7 @@ async with lock:
 
 ## 9. Circuit breakers
 
-El patrón circuit breaker evita cascadas de error cuando una API externa cae. Implementado en `services/infra/circuit_breaker.py` con `TTLCache` para auto-reset.
+El patrón circuit breaker evita cascadas de error cuando una API externa cae. Implementado en `infra/circuit_breaker.py` con `TTLCache` para auto-reset.
 
 ### Estados
 
@@ -760,7 +760,7 @@ Niveles de logs relevantes:
 | `[BOOKING]` | `scheduling/booking.py` | Evento creado, errores de calendario |
 | `[SCHEDULE]` | `scheduling/schedule_validator.py` | Validaciones de horario |
 | `[RECOMMENDATION]` | `scheduling/schedule_recommender.py` | Sugerencias de horarios |
-| `[CB:nombre]` | `infra/circuit_breaker.py` | Estado del circuit breaker |
+| `[CB:nombre]` | `infra/circuit_breaker.py` | Estado del circuit breaker (open/closed) |
 
 ---
 
@@ -819,7 +819,7 @@ Verifica el estado del servicio y sus dependencias.
 {
   "status": "ok",
   "agent": "citas",
-  "version": "2.0.0",
+  "version": "2.5.0",
   "issues": []
 }
 ```
@@ -829,7 +829,7 @@ Verifica el estado del servicio y sus dependencias.
 {
   "status": "degraded",
   "agent": "citas",
-  "version": "2.0.0",
+  "version": "2.5.0",
   "issues": ["informacion_api_degraded", "calendario_api_degraded"]
 }
 ```
@@ -1171,28 +1171,25 @@ agent_citas/
 │   ├── main.py                        # FastAPI app: /api/chat, /health, /metrics
 │   ├── logger.py                      # Logging centralizado
 │   ├── metrics.py                     # Definición de métricas Prometheus + context managers
-│   ├── validation.py                  # Validadores Pydantic + regex para datos de booking
 │   ├── __init__.py
 │   │
-│   ├── agent/
+│   ├── agent/                         # Orquestación del agente LangGraph
 │   │   ├── agent.py                   # Core: TTLCache, session locks, middleware ventana, process_cita_message()
 │   │   ├── content.py                 # CitaStructuredResponse (Pydantic) + _build_content (multimodal)
 │   │   ├── context.py                 # AgentContext (dataclass) + _validate_context + _prepare_agent_context
-│   │   └── __init__.py
+│   │   ├── __init__.py
+│   │   └── prompts/                   # System prompt del agente
+│   │       ├── __init__.py            # build_citas_system_prompt() — asyncio.gather x4 + Jinja2
+│   │       └── citas_system.j2        # Template del system prompt
 │   │
-│   ├── tool/
+│   ├── tool/                          # Tools del agente (@tool LangChain)
 │   │   ├── tools.py                   # check_availability, create_booking, search_productos_servicios
+│   │   ├── validation.py              # Validadores Pydantic + regex para datos de booking
 │   │   └── __init__.py
 │   │
-│   ├── services/
+│   ├── services/                      # Lógica de negocio
 │   │   ├── __init__.py                # Re-exports de todos los subdirectorios (compatibilidad)
 │   │   ├── busqueda_productos.py      # buscar_productos_servicios() para tool (TTLCache 15min)
-│   │   │
-│   │   ├── infra/                     # Infraestructura HTTP compartida
-│   │   │   ├── circuit_breaker.py     # CircuitBreaker: informacion_cb, preguntas_cb, calendario_cb, agendar_reunion_cb
-│   │   │   ├── http_client.py         # httpx.AsyncClient singleton + post_with_logging (tenacity retry)
-│   │   │   ├── _resilience.py         # resilient_call() — wrapper CB + retry
-│   │   │   └── __init__.py
 │   │   │
 │   │   ├── prompt_data/               # Fetchers de datos para el system prompt
 │   │   │   ├── contexto_negocio.py    # fetch_contexto_negocio() con TTLCache + fetch lock
@@ -1209,16 +1206,15 @@ agent_citas/
 │   │       ├── time_parser.py         # Utilidades puras de parsing de tiempo (sin I/O)
 │   │       └── __init__.py
 │   │
-│   ├── config/
-│   │   ├── config.py                  # Variables de entorno con validación de tipos
+│   ├── infra/                         # Infraestructura HTTP transversal
+│   │   ├── circuit_breaker.py         # CircuitBreaker: informacion_cb, preguntas_cb, calendario_cb, agendar_reunion_cb
+│   │   ├── http_client.py             # httpx.AsyncClient singleton + post_with_logging (tenacity retry)
+│   │   ├── _resilience.py             # resilient_call() — wrapper CB + retry
 │   │   └── __init__.py
 │   │
-│   └── prompts/
-│       ├── __init__.py                # build_citas_system_prompt() — asyncio.gather x4 + Jinja2
-│       └── citas_system.j2            # Template del system prompt
-│
-├── docs/
-│   ├── PENDIENTES.md                  # Roadmap técnico (Redis, auth)
+│   └── config/
+│       ├── config.py                  # Variables de entorno con validación de tipos
+│       └── __init__.py
 │
 ├── pyproject.toml                     # hatchling build, deps pinneadas
 ├── Dockerfile                         # python:3.12-slim + uv
