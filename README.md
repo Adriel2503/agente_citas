@@ -211,14 +211,17 @@ agent = create_agent(
     system_prompt=system_prompt,          # Template Jinja2 renderizado
     checkpointer=_checkpointer,           # InMemorySaver (→ AsyncRedisSaver en roadmap)
     response_format=CitaStructuredResponse,  # Structured output: reply + url
+    middleware=[_message_window],         # Ventana de mensajes (trim_messages, no destructivo)
 )
 ```
 
 ### Memoria conversacional
 
-LangGraph usa `thread_id = str(session_id)` como identificador de conversación. Cada mensaje nuevo se acumula en el checkpointer junto con el historial anterior. El LLM recibe todos los mensajes previos en cada llamada, lo que le permite mantener contexto de citas ya discutidas, nombre del cliente, etc.
+LangGraph usa `thread_id = str(session_id)` como identificador de conversación. Cada mensaje nuevo se acumula en el checkpointer junto con el historial anterior.
 
-**Limitación actual:** `InMemorySaver` no tiene TTL ni límite de mensajes. Las conversaciones crecen indefinidamente en RAM. Ver §18 y §19.
+**Ventana de mensajes:** El middleware `_message_window` (vía `wrap_model_call` + `trim_messages`) limita a `MAX_MESSAGES_HISTORY` (default 20) los mensajes que ve el LLM en cada llamada. El checkpointer conserva el historial completo — solo se recorta lo que se envía al modelo.
+
+**Limitación actual:** `InMemorySaver` no tiene TTL. Las conversaciones crecen indefinidamente en RAM. Ver §18.
 
 ### Runtime context injection (LangChain 1.2+ ToolRuntime)
 
@@ -471,7 +474,7 @@ Fase 3 — Creación del evento (confirm_booking → ws_calendario.php)
 **Endpoint:** `ws_calendario.php` (`API_CALENDAR_URL`)
 **Circuit breaker:** `calendario_cb` (key fija `"global"`)
 
-**Nota de diseño:** El campo `titulo` lo construye el código, no el LLM. Esto evita que el LLM inyecte texto arbitrario en el calendario de la empresa. `confirm_booking` usa `client.post()` directo (sin `post_with_retry`) porque CREAR_EVENTO no es idempotente — un retry podría duplicar el evento.
+**Nota de diseño:** El campo `titulo` lo construye el código, no el LLM. Esto evita que el LLM inyecte texto arbitrario en el calendario de la empresa. `confirm_booking` usa `client.post()` directo (sin retry) porque CREAR_EVENTO no es idempotente — un retry podría duplicar el evento.
 
 ---
 
@@ -553,7 +556,7 @@ Para servicios (`nombre_tipo_producto: "Servicio"`), el formato omite la unidad:
 | 2 | Parseo de hora (`HH:MM AM/PM` o `HH:MM`) | Entrada del LLM |
 | 3 | Combinar fecha + hora en `datetime` | — |
 | 4 | ¿La fecha/hora ya pasó? (zona horaria `TIMEZONE`) | `datetime.now(ZoneInfo)` |
-| 5 | Obtener horario de la empresa | `get_horario()` (TTLCache) |
+| 5 | Obtener horario de la empresa | `_fetch_horario()` (directo a API, sin cache) |
 | 6 | ¿Hay horario para ese día de la semana? | `horario_reuniones[reunion_lunes]` etc. |
 | 7 | ¿El día está marcado como cerrado/no disponible? | `"NO DISPONIBLE"`, `"CERRADO"`, etc. |
 | 8 | Parsear rango de horario del día (`"09:00-18:00"`) | `horario_reuniones` |
@@ -605,17 +608,17 @@ El agente usa **4 capas de caché** independientes, con TTLs distintos según la
 
 | Caché | Módulo | Clave | Maxsize | TTL | Propósito |
 |-------|--------|-------|---------|-----|-----------|
-| `_agent_cache` | `agent.py` | `(id_empresa,)` | 500 | `AGENT_CACHE_TTL_MINUTES` (60 min) | Agente compilado (grafo LangGraph + system prompt) |
-| `_horario_cache` | `horario_cache.py` | `id_empresa` | 500 | `SCHEDULE_CACHE_TTL_MINUTES` (5 min) | Horario de reuniones por empresa |
-| `_contexto_cache` | `contexto_negocio.py` | `id_empresa` | 500 | 1 hora | Descripción y contexto de la empresa |
-| `_preguntas_cache` | `preguntas_frecuentes.py` | `id_chatbot` | 500 | 1 hora | FAQs del chatbot |
+| `_agent_cache` | `agent/agent.py` | `(id_empresa,)` | 500 | `AGENT_CACHE_TTL_MINUTES` (60 min) | Agente compilado (grafo LangGraph + system prompt) |
+| `_horario_cache` | `prompt_data/horario_reuniones.py` | `id_empresa` | 500 | `SCHEDULE_CACHE_TTL_MINUTES` (5 min) | Horario de reuniones por empresa |
+| `_contexto_cache` | `prompt_data/contexto_negocio.py` | `id_empresa` | 500 | 1 hora | Descripción y contexto de la empresa |
+| `_preguntas_cache` | `prompt_data/preguntas_frecuentes.py` | `id_chatbot` | 500 | 1 hora | FAQs del chatbot |
 | `_busqueda_cache` | `busqueda_productos.py` | `(id_empresa, busqueda)` | 2000 | 15 min | Resultados de búsqueda de productos/servicios |
 
 ### Por qué dos TTLs distintos para agente y horario
 
 El system prompt incluye el horario de atención. Si `SCHEDULE_CACHE_TTL_MINUTES = 5 min` y `AGENT_CACHE_TTL_MINUTES = 60 min`, el agente compilado usaría el horario viejo durante 60 min aunque el horario del negocio haya cambiado.
 
-**Solución:** `ScheduleValidator.validate()` llama directamente a `get_horario()` (TTLCache de 5 min), sin pasar por el system prompt. Esto garantiza que la validación final antes de crear el evento siempre use datos frescos, independientemente del TTL del agente.
+**Solución:** `ScheduleValidator.validate()` llama directamente a `_fetch_horario()` (sin cache, directo a la API), sin pasar por el system prompt. Esto garantiza que la validación final antes de crear el evento siempre use datos frescos, independientemente del TTL del agente.
 
 ### Thundering herd prevention
 
@@ -648,7 +651,7 @@ async with lock:
 
 ## 9. Circuit breakers
 
-El patrón circuit breaker evita cascadas de error cuando una API externa cae. Implementado en `services/circuit_breaker.py` con `TTLCache` para auto-reset.
+El patrón circuit breaker evita cascadas de error cuando una API externa cae. Implementado en `services/infra/circuit_breaker.py` con `TTLCache` para auto-reset.
 
 ### Estados
 
@@ -661,10 +664,10 @@ OPEN → [reset_ttl segundos sin llamadas] → CLOSED (auto-reset por TTL)
 
 | Singleton | API protegida | Clave | Quién lo usa |
 |-----------|--------------|-------|--------------|
-| `informacion_cb` | `ws_informacion_ia.php` | `id_empresa` | `horario_cache`, `contexto_negocio`, `productos_servicios_citas`, `busqueda_productos` |
-| `preguntas_cb` | `ws_preguntas_frecuentes.php` | `id_chatbot` | `preguntas_frecuentes` |
-| `calendario_cb` | `ws_calendario.php` | `"global"` | `booking` |
-| `agendar_reunion_cb` | `ws_agendar_reunion.php` | `id_empresa` | `schedule_validator` (CONSULTAR_DISPONIBILIDAD, SUGERIR_HORARIOS) |
+| `informacion_cb` | `ws_informacion_ia.php` | `id_empresa` | `prompt_data/` (contexto_negocio, horario_reuniones, productos_servicios_citas), `busqueda_productos` |
+| `preguntas_cb` | `ws_preguntas_frecuentes.php` | `id_chatbot` | `prompt_data/preguntas_frecuentes` |
+| `calendario_cb` | `ws_calendario.php` | `"global"` | `scheduling/booking` |
+| `agendar_reunion_cb` | `ws_agendar_reunion.php` | `id_empresa` | `scheduling/schedule_validator`, `scheduling/schedule_recommender` (CONSULTAR_DISPONIBILIDAD, SUGERIR_HORARIOS) |
 
 `calendario_cb` usa clave fija `"global"` porque `ws_calendario.php` es un servicio compartido de la plataforma MaravIA — si cae, cae para todas las empresas.
 
@@ -710,7 +713,7 @@ async with lock:
 
 Misma estrategia para evitar que múltiples sesiones de la misma empresa construyan el agente simultáneamente (thundering herd en el primer request de cada empresa).
 
-**Limpieza:** Umbral de 150 entradas (1.5× el maxsize del TTLCache de 100 agentes).
+**Limpieza:** Umbral de 750 entradas (1.5× el maxsize del TTLCache de 500 agentes).
 
 ### Paralelismo en `build_citas_system_prompt`
 
@@ -752,13 +755,12 @@ Niveles de logs relevantes:
 | Prefijo | Módulo | Ejemplos |
 |---------|--------|---------|
 | `[HTTP]` | `main.py` | Request recibido, respuesta generada, timeouts |
-| `[AGENT]` | `agent.py` | Cache hit/miss, creación de agente, invocación |
-| `[TOOL]` | `tools.py` | Tool invocada, validaciones, resultados |
-| `[BOOKING]` | `booking.py` | Evento creado, errores de calendario |
-| `[AVAILABILITY]` | `schedule_validator.py` | Consultas de disponibilidad |
-| `[HORARIO_CACHE]` | `horario_cache.py` | Cache hit/miss, fetches |
-| `[CB:nombre]` | `circuit_breaker.py` | Estado del circuit breaker |
-| `[create_booking]` | `tools.py` | Log detallado de las 3 APIs del flujo de reserva |
+| `[AGENT]` | `agent/agent.py` | Cache hit/miss, creación de agente, invocación |
+| `[TOOL]` | `tool/tools.py` | Tool invocada, validaciones, resultados |
+| `[BOOKING]` | `scheduling/booking.py` | Evento creado, errores de calendario |
+| `[SCHEDULE]` | `scheduling/schedule_validator.py` | Validaciones de horario |
+| `[RECOMMENDATION]` | `scheduling/schedule_recommender.py` | Sugerencias de horarios |
+| `[CB:nombre]` | `infra/circuit_breaker.py` | Estado del circuit breaker |
 
 ---
 
@@ -891,15 +893,15 @@ Todas las APIs externas son PHP endpoints de MaravIA. Se comunican vía POST JSO
 
 | Endpoint PHP | `codOpe` | Módulo que lo llama | CB | Cuándo se ejecuta |
 |-------------|----------|--------------------|----|-------------------|
-| `ws_informacion_ia.php` | `OBTENER_HORARIO_REUNIONES` | `horario_cache.py` | `informacion_cb` | Cache miss al crear agente o validar cita |
-| | `OBTENER_CONTEXTO_NEGOCIO` | `contexto_negocio.py` | `informacion_cb` | Cache miss al crear agente |
-| | `OBTENER_PRODUCTOS_CITAS` | `productos_servicios_citas.py` | `informacion_cb` | Cache miss al crear agente |
-| | `OBTENER_SERVICIOS_CITAS` | `productos_servicios_citas.py` | `informacion_cb` | Cache miss al crear agente |
+| `ws_informacion_ia.php` | `OBTENER_HORARIO_REUNIONES` | `prompt_data/horario_reuniones.py`, `scheduling/schedule_validator.py` | `informacion_cb` | Cache miss al crear agente o validar cita |
+| | `OBTENER_CONTEXTO_NEGOCIO` | `prompt_data/contexto_negocio.py` | `informacion_cb` | Cache miss al crear agente |
+| | `OBTENER_PRODUCTOS_CITAS` | `prompt_data/productos_servicios_citas.py` | `informacion_cb` | Cache miss al crear agente |
+| | `OBTENER_SERVICIOS_CITAS` | `prompt_data/productos_servicios_citas.py` | `informacion_cb` | Cache miss al crear agente |
 | | `BUSCAR_PRODUCTOS_SERVICIOS_CITAS` | `busqueda_productos.py` | `informacion_cb` | Tool `search_productos_servicios` |
-| `ws_agendar_reunion.php` | `SUGERIR_HORARIOS` | `schedule_validator.py` | `agendar_reunion_cb` | Tool `check_availability` sin hora |
-| | `CONSULTAR_DISPONIBILIDAD` | `schedule_validator.py` | `agendar_reunion_cb` | Tool `check_availability` con hora; o paso 12 de `create_booking` |
-| `ws_calendario.php` | `CREAR_EVENTO` | `booking.py` | `calendario_cb` | Tool `create_booking` (fase 3) |
-| `ws_preguntas_frecuentes.php` | _(sin codOpe)_ | `preguntas_frecuentes.py` | `preguntas_cb` | Cache miss al crear agente |
+| `ws_agendar_reunion.php` | `SUGERIR_HORARIOS` | `scheduling/schedule_recommender.py` | `agendar_reunion_cb` | Tool `check_availability` sin hora |
+| | `CONSULTAR_DISPONIBILIDAD` | `scheduling/availability_client.py` | `agendar_reunion_cb` | Tool `check_availability` con hora; o paso 12 de `create_booking` |
+| `ws_calendario.php` | `CREAR_EVENTO` | `scheduling/booking.py` | `calendario_cb` | Tool `create_booking` (fase 3) |
+| `ws_preguntas_frecuentes.php` | _(sin codOpe)_ | `prompt_data/preguntas_frecuentes.py` | `preguntas_cb` | Cache miss al crear agente |
 
 ---
 
@@ -1080,7 +1082,7 @@ Creación de eventos. Protegida por `calendario_cb` con clave global.
 }
 ```
 
-**Importante:** `CREAR_EVENTO` usa `client.post()` directo (sin `post_with_retry`) porque **no es idempotente** — un retry podría duplicar el evento en el calendario.
+**Importante:** `CREAR_EVENTO` usa `client.post()` directo (sin `post_with_logging` / retry) porque **no es idempotente** — un retry podría duplicar el evento en el calendario.
 
 | Campo del payload | Origen | Descripción |
 |-------------------|--------|-------------|
@@ -1126,13 +1128,13 @@ Respuesta: De lunes a viernes de 9am a 6pm
 
 ---
 
-### `post_with_retry` — cliente HTTP compartido
+### `post_with_logging` — cliente HTTP compartido
 
-Todas las llamadas de **lectura** usan `post_with_retry()` de `http_client.py`:
+Todas las llamadas de **lectura** usan `post_with_logging()` de `infra/http_client.py`:
 - Cliente `httpx.AsyncClient` singleton compartido entre todos los requests (connection pool reusado).
-- Reintentos con backoff exponencial: `HTTP_RETRY_ATTEMPTS` veces (default 3), espera entre `HTTP_RETRY_WAIT_MIN` y `HTTP_RETRY_WAIT_MAX` segundos.
+- Reintentos con backoff exponencial (tenacity): `HTTP_RETRY_ATTEMPTS` veces (default 3), espera entre `HTTP_RETRY_WAIT_MIN` y `HTTP_RETRY_WAIT_MAX` segundos.
 - Solo reintenta ante `httpx.TransportError` (errores de red). Los errores HTTP (4xx, 5xx) **no** se reintentan.
-- `CREAR_EVENTO` **no** usa `post_with_retry` (riesgo de duplicados).
+- `CREAR_EVENTO` **no** usa `post_with_logging` (riesgo de duplicados).
 
 **Configuración del cliente:**
 ```python
@@ -1152,12 +1154,11 @@ Tool llamada por LLM
       ├─ 3. Anti-thundering herd: asyncio.Lock por cache_key
       └─ 4. resilient_call()
             ├─ CB check (redundante, por si cambió entre 2 y 4)
-            └─ post_with_logging()
-                  └─ post_with_retry()  ← tenacity: 3 intentos, backoff exponencial
-                        └─ httpx.AsyncClient.post()
-                              ├─ Éxito → CB reset, cache write, return
-                              ├─ TransportError → CB record_failure, tenacity retry
-                              └─ HTTPStatusError → no afecta CB, propaga error
+            └─ post_with_logging()  ← tenacity: 3 intentos, backoff exponencial
+                  └─ httpx.AsyncClient.post()
+                        ├─ Éxito → CB reset, cache write, return
+                        ├─ TransportError → CB record_failure, tenacity retry
+                        └─ HTTPStatusError → no afecta CB, propaga error
 ```
 
 ---
@@ -1168,13 +1169,15 @@ Tool llamada por LLM
 agent_citas/
 ├── src/citas/
 │   ├── main.py                        # FastAPI app: /api/chat, /health, /metrics
-│   ├── logger.py                      # Logging centralizado (JSON estructurado o texto)
+│   ├── logger.py                      # Logging centralizado
 │   ├── metrics.py                     # Definición de métricas Prometheus + context managers
 │   ├── validation.py                  # Validadores Pydantic + regex para datos de booking
 │   ├── __init__.py
 │   │
 │   ├── agent/
-│   │   ├── agent.py                   # Core: TTLCache de agentes, session locks, process_cita_message()
+│   │   ├── agent.py                   # Core: TTLCache, session locks, middleware ventana, process_cita_message()
+│   │   ├── content.py                 # CitaStructuredResponse (Pydantic) + _build_content (multimodal)
+│   │   ├── context.py                 # AgentContext (dataclass) + _validate_context + _prepare_agent_context
 │   │   └── __init__.py
 │   │
 │   ├── tool/
@@ -1182,18 +1185,29 @@ agent_citas/
 │   │   └── __init__.py
 │   │
 │   ├── services/
-│   │   ├── horario_cache.py           # TTLCache compartido de OBTENER_HORARIO_REUNIONES (fuente única)
-│   │   ├── schedule_validator.py      # ScheduleValidator: pipeline de 12 validaciones
-│   │   ├── booking.py                 # confirm_booking() → ws_calendario (CREAR_EVENTO)
-│   │   ├── contexto_negocio.py        # fetch_contexto_negocio() con TTLCache + fetch lock
-│   │   ├── preguntas_frecuentes.py    # fetch_preguntas_frecuentes() con TTLCache + fetch lock
-│   │   ├── horario_reuniones.py       # fetch_horario_reuniones() para system prompt (usa horario_cache)
-│   │   ├── productos_servicios_citas.py  # fetch_nombres_productos_servicios() para system prompt
+│   │   ├── __init__.py                # Re-exports de todos los subdirectorios (compatibilidad)
 │   │   ├── busqueda_productos.py      # buscar_productos_servicios() para tool (TTLCache 15min)
-│   │   ├── circuit_breaker.py         # CircuitBreaker: informacion_cb, preguntas_cb, calendario_cb, agendar_reunion_cb
-│   │   ├── http_client.py             # httpx.AsyncClient singleton + post_with_retry (tenacity)
-│   │   ├── _resilience.py             # resilient_call() — wrapper CB + retry
-│   │   └── __init__.py
+│   │   │
+│   │   ├── infra/                     # Infraestructura HTTP compartida
+│   │   │   ├── circuit_breaker.py     # CircuitBreaker: informacion_cb, preguntas_cb, calendario_cb, agendar_reunion_cb
+│   │   │   ├── http_client.py         # httpx.AsyncClient singleton + post_with_logging (tenacity retry)
+│   │   │   ├── _resilience.py         # resilient_call() — wrapper CB + retry
+│   │   │   └── __init__.py
+│   │   │
+│   │   ├── prompt_data/               # Fetchers de datos para el system prompt
+│   │   │   ├── contexto_negocio.py    # fetch_contexto_negocio() con TTLCache + fetch lock
+│   │   │   ├── horario_reuniones.py   # fetch_horario_reuniones() + format para prompt
+│   │   │   ├── preguntas_frecuentes.py # fetch_preguntas_frecuentes() con TTLCache + fetch lock
+│   │   │   ├── productos_servicios_citas.py # fetch nombres productos/servicios para prompt
+│   │   │   └── __init__.py
+│   │   │
+│   │   └── scheduling/                # Lógica de agendamiento
+│   │       ├── schedule_validator.py  # ScheduleValidator: pipeline de 12 validaciones
+│   │       ├── schedule_recommender.py # ScheduleRecommender: SUGERIR_HORARIOS + check slot
+│   │       ├── availability_client.py # check_slot_availability (infra compartida validator/recommender)
+│   │       ├── booking.py             # confirm_booking() → ws_calendario (CREAR_EVENTO)
+│   │       ├── time_parser.py         # Utilidades puras de parsing de tiempo (sin I/O)
+│   │       └── __init__.py
 │   │
 │   ├── config/
 │   │   ├── config.py                  # Variables de entorno con validación de tipos
@@ -1204,13 +1218,11 @@ agent_citas/
 │       └── citas_system.j2            # Template del system prompt
 │
 ├── docs/
-│   ├── PENDIENTES.md                  # Roadmap técnico (Redis, auth, trim_messages)
-│   ├── ARCHITECTURE.md
-│   ├── API.md
-│   ├── DEPLOYMENT.md
-│   └── analisis_tecnico.md
+│   ├── PENDIENTES.md                  # Roadmap técnico (Redis, auth)
 │
-├── requirements.txt
+├── pyproject.toml                     # hatchling build, deps pinneadas
+├── Dockerfile                         # python:3.12-slim + uv
+├── run.py                             # Entry point dev local
 ├── .env.example
 └── README.md
 ```
@@ -1219,21 +1231,25 @@ agent_citas/
 
 ## 16. Stack tecnológico
 
-| Componente | Librería | Versión mínima | Rol |
-|------------|----------|----------------|-----|
-| Web framework | `fastapi` + `uvicorn` | `>=0.110.0` | Servidor HTTP ASGI |
-| Validación | `pydantic` v2 | `>=2.6.0` | Modelos de request/response y config |
-| LLM agent | `langchain` | `>=1.2.0` | `create_agent`, `@tool`, `ToolRuntime` |
-| Grafos de agente | `langgraph` | `>=0.2.0` | Checkpointer, flujo de mensajes |
-| Memoria | `langgraph` `InMemorySaver` | — | Estado conversacional por `thread_id` |
-| LLM provider | `langchain-openai` | `>=0.3.0` | `init_chat_model("openai:gpt-4o-mini")` |
-| HTTP client | `httpx` | `>=0.27.0` | Llamadas async a APIs externas |
-| Templates | `jinja2` | `>=3.1.3` | System prompt con variables dinámicas |
-| Métricas | `prometheus-client` | `>=0.19.0` | Exposición de métricas en `/metrics` |
-| Cache en memoria | `cachetools` | `>=5.3.0` | `TTLCache` para agentes, horarios, contexto |
-| Parseo de fechas | `dateparser` | `>=1.2.0` | Fechas naturales en validación |
-| Variables de entorno | `python-dotenv` | `>=1.0.0` | Carga de `.env` |
-| Zona horaria | `zoneinfo` (stdlib) | Python 3.9+ | `America/Lima` y otras TZs |
+Todas las dependencias están pinneadas en [`pyproject.toml`](pyproject.toml) con comentarios por categoría. El proyecto usa `hatchling` como build backend y `uv` como package manager (local y Docker).
+
+| Componente | Librería | Versión | Rol |
+|------------|----------|---------|-----|
+| Web framework | `fastapi` + `uvicorn[standard]` | 0.135.1 / 0.41.0 | Servidor HTTP ASGI |
+| Validación | `pydantic` v2 | 2.12.5 | Modelos de request/response y datos de booking |
+| LLM agent | `langchain` + `langchain-core` | 1.2.10 / 1.2.17 | `create_agent`, `@tool`, `ToolRuntime`, `trim_messages`, `wrap_model_call` |
+| LLM provider | `langchain-openai` | 1.1.10 | `init_chat_model("openai:gpt-4o-mini")` |
+| Grafos de agente | `langgraph` + `langgraph-checkpoint` | 1.0.10 / 4.0.1 | Checkpointer (InMemorySaver), flujo de mensajes |
+| OpenAI SDK | `openai` | 2.26.0 | Error types (`AuthenticationError`, `RateLimitError`, etc.) |
+| HTTP client | `httpx` | 0.28.1 | Llamadas async a APIs externas |
+| Retry | `tenacity` | 9.1.4 | Backoff exponencial en `post_with_logging` |
+| Templates | `jinja2` | 3.1.6 | System prompt con variables dinámicas |
+| Métricas | `prometheus-client` | 0.24.1 | Exposición de métricas en `/metrics` |
+| Cache en memoria | `cachetools` | 7.0.3 | `TTLCache` para agentes, horarios, contexto, búsquedas |
+| Variables de entorno | `python-dotenv` | 1.2.2 | Carga de `.env` |
+| Zona horaria | `zoneinfo` (stdlib) | Python 3.12+ | `America/Lima` y otras TZs |
+| Build | `hatchling` | — | Build backend (`pyproject.toml`) |
+| Package manager | `uv` | latest | Instalación rápida (local y Docker) |
 
 ---
 
@@ -1241,7 +1257,8 @@ agent_citas/
 
 ### Requisitos
 
-- Python 3.10+
+- Python 3.12+
+- `uv` ([instalación](https://docs.astral.sh/uv/getting-started/installation/))
 - `OPENAI_API_KEY` válida
 - Acceso a red hacia `api.maravia.pe` (APIs externas)
 
@@ -1249,12 +1266,12 @@ agent_citas/
 
 ```bash
 # 1. Crear y activar entorno virtual
-python -m venv venv_agent_citas
+uv venv venv_agent_citas
 source venv_agent_citas/bin/activate   # Linux/Mac
 # venv_agent_citas\Scripts\activate    # Windows
 
-# 2. Instalar dependencias
-pip install -r requirements.txt
+# 2. Instalar paquete y dependencias
+uv pip install .
 
 # 3. Configurar variables de entorno
 cp .env.example .env
@@ -1311,14 +1328,6 @@ curl -X POST http://localhost:8002/api/chat \
 
 ---
 
-### 🟡 Sin límite de ventana de mensajes
-
-**Qué pasa:** El LLM recibe el historial completo en cada llamada. Una conversación de 50 turnos consume 50× más tokens del prompt que una de 1 turno, aumentando costo y latencia.
-
-**Solución disponible ahora** (sin Redis): `trim_messages(max_tokens=20)` en `create_agent()`. Ver `docs/PENDIENTES.md`.
-
----
-
 ### 🟡 Sin modificación ni cancelación de citas
 
 **Qué pasa:** El agente no tiene tools para editar o cancelar eventos ya creados. Si un cliente quiere cambiar su cita, el agente responde que lo derivará a un asesor.
@@ -1364,20 +1373,19 @@ El detalle completo con código de implementación está en [`docs/PENDIENTES.md
    1. InMemorySaver → AsyncRedisSaver (TTL 24h)
       - langgraph-checkpoint-redis
       - REDIS_URL=redis://memori_agentes:6379 (ya existe en Easypanel)
-      - Archivos: agent/agent.py, requirements.txt
+      - Archivos: agent/agent.py, pyproject.toml
 
    2. Auth X-Internal-Token en /api/chat
       - FastAPI Depends + nuevo env var INTERNAL_API_TOKEN
       - También actualizar gateway Go
 
-🟡 MEJORAS IMPORTANTES:
-   3. Límite de ventana de mensajes (trim_messages, max=20 turnos)
-      - Se puede hacer AHORA, sin Redis
-      - 1 archivo, 10 minutos: agent/agent.py
+✅ IMPLEMENTADOS:
+   - Ventana de mensajes (wrap_model_call + trim_messages, max=20)
+   - Middleware no destructivo: checkpointer intacto, compatible con Redis
 
 🟢 DIFERIDAS:
-   4. Tests unitarios (pytest + pytest-asyncio)
-   5. Streaming SSE (TTFT real)
+   - Tests unitarios (pytest + pytest-asyncio)
+   - Streaming SSE — descartado (canal WhatsApp, respuesta siempre completa)
 ```
 
 ---
