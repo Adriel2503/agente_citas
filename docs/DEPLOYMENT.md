@@ -81,8 +81,13 @@ Host: 0.0.0.0:8002
 Modelo: gpt-4o-mini
 Timeout LLM: 60s
 Timeout API: 10s
-Cache TTL horario: 5 min
-Cache TTL agente:  60 min
+Cache TTL agente:   60 min
+Cache TTL búsqueda: 15 min
+Max mensajes LLM:   20
+Timeout chat:       120s
+Timezone: America/Lima
+Circuit breaker threshold: 3 fallos
+Redis checkpointer: InMemorySaver
 Log Level: INFO
 ------------------------------------------------------------
 Endpoint: POST /api/chat
@@ -139,9 +144,11 @@ CB_THRESHOLD=3                    # fallos consecutivos para abrir
 CB_RESET_TTL=300                  # segundos hasta auto-reset (5 min)
 
 # ── Cache ─────────────────────────────────────────────────
-SCHEDULE_CACHE_TTL_MINUTES=5      # horario de reuniones
 AGENT_CACHE_TTL_MINUTES=60        # agente compilado por empresa
 AGENT_CACHE_MAXSIZE=500           # maximo de agentes en cache
+SEARCH_CACHE_TTL_MINUTES=15       # busqueda de productos/servicios
+SEARCH_CACHE_MAXSIZE=2000         # maximo de busquedas en cache
+MAX_MESSAGES_HISTORY=20           # ventana de mensajes enviados al LLM
 
 # ── Zona horaria ──────────────────────────────────────────
 TIMEZONE=America/Lima
@@ -191,9 +198,11 @@ CB_THRESHOLD=3
 CB_RESET_TTL=300
 
 # ── Cache ─────────────────────────────────────────────────
-SCHEDULE_CACHE_TTL_MINUTES=10     # cache mas largo reduce llamadas a API
 AGENT_CACHE_TTL_MINUTES=60
 AGENT_CACHE_MAXSIZE=500
+SEARCH_CACHE_TTL_MINUTES=15       # busqueda de productos/servicios
+SEARCH_CACHE_MAXSIZE=2000
+MAX_MESSAGES_HISTORY=20
 
 # ── Zona horaria ──────────────────────────────────────────
 TIMEZONE=America/Lima
@@ -230,9 +239,11 @@ Todos los valores se validan en `config/config.py`. Si un valor esta fuera de ra
 | `HTTP_RETRY_WAIT_MAX` | int | 1 – 60s | `4` |
 | `CB_THRESHOLD` | int | 1 – 20 | `3` |
 | `CB_RESET_TTL` | int | 60 – 3600s | `300` |
-| `SCHEDULE_CACHE_TTL_MINUTES` | int | 1 – 1440 min | `5` |
 | `AGENT_CACHE_TTL_MINUTES` | int | 5 – 1440 min | `60` |
 | `AGENT_CACHE_MAXSIZE` | int | 10 – 5000 | `500` |
+| `SEARCH_CACHE_TTL_MINUTES` | int | 1 – 60 min | `15` |
+| `SEARCH_CACHE_MAXSIZE` | int | 10 – 10000 | `2000` |
+| `MAX_MESSAGES_HISTORY` | int | 4 – 200 | `20` |
 | `LOG_LEVEL` | string | `DEBUG\|INFO\|WARNING\|ERROR\|CRITICAL` | `INFO` |
 
 ---
@@ -404,7 +415,7 @@ Easypanel rebuilds la imagen automaticamente al hacer push al branch configurado
 
 **Al hacer redeploy:**
 - El container se recrea → las conversaciones en `InMemorySaver` se pierden (mitigado con Redis).
-- Los caches en memoria (agente, horario, contexto) se vacian → cold start normal, se rellenan con el primer request de cada empresa.
+- Los caches en memoria (agente, búsqueda) se vacian → cold start normal, se rellenan con el primer request de cada empresa.
 - Los circuit breakers se resetean → vuelven a estado cerrado (sano).
 
 ### Health check en Easypanel
@@ -472,7 +483,7 @@ Respuesta esperada:
 {"reply": "¡Hola! ¿Para qué fecha te gustaría la reunión?", "url": null}
 ```
 
-**Nota:** El campo `url` es `null` por defecto. Solo tiene valor cuando el agente adjunta una imagen de saludo (`archivo_saludo` en config) o un enlace de Google Meet (tras crear cita exitosamente).
+**Nota:** El campo `url` es `null` por defecto. Solo tiene valor en el primer mensaje de la conversacion, cuando el agente adjunta la imagen de saludo (`archivo_saludo` en config). Los enlaces de Google Meet van en el campo `reply` como texto, nunca en `url`.
 
 ### 3. Verificar metricas
 
@@ -612,8 +623,8 @@ grep SERVER_PORT .env
 **Causas posibles y diagnostico:**
 
 ```bash
-# 1. Ver si el cache de horarios esta frio (0 entradas = cold start)
-curl -s http://localhost:8002/metrics | grep cache_entries
+# 1. Ver estado de caches (entradas actuales)
+curl -s http://localhost:8002/metrics | grep cache
 
 # 2. Buscar timeouts en logs
 docker logs agent-citas 2>&1 | grep -i timeout
@@ -624,9 +635,8 @@ curl -s http://localhost:8002/metrics | grep -E "llm_call|chat_response"
 
 **Soluciones:**
 - **Cache frio (cold start):** Normal en el primer request tras deploy. Las siguientes son rapidas.
-- **APIs MaravIA lentas:** Aumentar `SCHEDULE_CACHE_TTL_MINUTES` (ej. 10 en produccion) para reducir llamadas.
+- **APIs MaravIA lentas:** Verificar conectividad a `api.maravia.pe` desde el servidor (`curl -w "%{time_total}" https://api.maravia.pe`).
 - **LLM lento:** Verificar `OPENAI_TIMEOUT`; considerar `gpt-4o-mini` si usas `gpt-4o` (mas rapido, mas barato).
-- **Red:** Verificar conectividad a `api.maravia.pe` desde el servidor (`curl -w "%{time_total}" https://api.maravia.pe`).
 
 ---
 
@@ -636,10 +646,10 @@ curl -s http://localhost:8002/metrics | grep -E "llm_call|chat_response"
 
 ```bash
 # Verificar que la key esta cargada (local)
-python -c "from citas.config import config; print(bool(config.OPENAI_API_KEY))"
+python -c "from citas.config import OPENAI_API_KEY; print(bool(OPENAI_API_KEY))"
 
 # En Docker
-docker exec agent-citas python -c "from citas.config import config; print(bool(config.OPENAI_API_KEY))"
+docker exec agent-citas python -c "from citas.config import OPENAI_API_KEY; print(bool(OPENAI_API_KEY))"
 
 # Health check reporta el problema
 curl -s http://localhost:8002/health
@@ -715,22 +725,18 @@ uvicorn.run(app, host="0.0.0.0", port=8002, workers=2)
 | Cache | Maxsize | TTL default | Variable de config |
 |-------|---------|-------------|--------------------|
 | Agentes compilados | 500 empresas | 60 min | `AGENT_CACHE_TTL_MINUTES`, `AGENT_CACHE_MAXSIZE` |
-| Horarios de reunion | 500 empresas | 5 min | `SCHEDULE_CACHE_TTL_MINUTES` |
-| Contexto de negocio | 500 empresas | 60 min | (hardcoded 3600s) |
-| Preguntas frecuentes | 500 chatbots | 60 min | (hardcoded 3600s) |
-| Busqueda productos | 2000 busquedas | 15 min | (hardcoded 900s) |
+| Busqueda productos | 2000 busquedas | 15 min | `SEARCH_CACHE_TTL_MINUTES`, `SEARCH_CACHE_MAXSIZE` |
 | Session locks | 500 sesiones | limpieza automatica | (cleanup threshold) |
 | Agent cache locks | 750 locks | limpieza automatica | (1.5x cache maxsize) |
 
-Con `SCHEDULE_CACHE_TTL_MINUTES=10` en produccion se reducen las llamadas a las APIs a la mitad.
+**Nota:** Horarios de reunion, contexto de negocio y preguntas frecuentes no tienen cache propio — se cachean indirectamente dentro del agente compilado (60 min). El `ScheduleValidator` llama a la API en cada validacion de cita (sin cache).
 
 ### Estimacion de uso de memoria
 
 | Componente | ~RAM por empresa activa |
 |-----------|------------------------|
-| Agente compilado (LangGraph) | ~2-5 MB |
-| Horario cache | ~1 KB |
-| Contexto de negocio cache | ~5 KB |
+| Agente compilado (LangGraph, incluye prompt data) | ~2-5 MB |
+| Busqueda cache (por termino unico) | ~2 KB |
 | InMemorySaver (por sesion) | ~50 KB por turno (crece sin limite) |
 
 Para 50 empresas activas simultaneamente: ~150-300 MB solo en agentes + caches. `InMemorySaver` puede agregar 50-200 MB adicionales dependiendo de la cantidad de sesiones activas y la longitud de las conversaciones.
@@ -750,7 +756,7 @@ Para 50 empresas activas simultaneamente: ~150-300 MB solo en agentes + caches. 
 | Imagen slim | `python:3.12-slim` (sin compiladores ni tools innecesarios) |
 | Package manager rápido | `uv` (instalado desde imagen oficial, cache eficiente) |
 | Read-only code | El codigo instalado como paquete, `appuser` solo puede leer |
-| No PYTHONDONTWRITEBYTECODE | Evita escritura de `.pyc` en el filesystem |
+| `PYTHONDONTWRITEBYTECODE=1` | Evita escritura de `.pyc` en el filesystem |
 
 ### Pendiente de implementar
 
