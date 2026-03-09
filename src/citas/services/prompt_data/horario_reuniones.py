@@ -8,7 +8,7 @@ from typing import Any
 
 from ... import config as app_config
 from ...logger import get_logger
-from ..infra import post_with_logging, informacion_cb as _default_informacion_cb, resilient_call, CircuitBreakerProtocol
+from ...infra import post_with_logging, informacion_cb as _default_informacion_cb, resilient_call, CircuitBreakerProtocol
 from ..scheduling.time_parser import DIAS_ORDEN
 
 logger = get_logger(__name__)

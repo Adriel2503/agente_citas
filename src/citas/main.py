@@ -21,7 +21,7 @@ from . import config as app_config
 from .agent import process_cita_message
 from .logger import setup_logging, get_logger
 from .metrics import initialize_agent_info, HTTP_REQUESTS, HTTP_DURATION
-from .services.infra import close_http_client, get_health_issues
+from .infra import close_http_client, get_health_issues
 
 # Configurar logging antes de cualquier otra cosa
 log_level = getattr(logging, app_config.LOG_LEVEL.upper(), logging.INFO)

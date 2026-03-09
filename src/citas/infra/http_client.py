@@ -18,8 +18,8 @@ from typing import Any
 import httpx
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
-from ... import config as app_config
-from ...logger import get_logger
+from .. import config as app_config
+from ..logger import get_logger
 
 logger = get_logger(__name__)
 

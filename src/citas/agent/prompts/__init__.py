@@ -10,9 +10,9 @@ from zoneinfo import ZoneInfo
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-from .. import config as app_config
-from ..logger import get_logger
-from ..services.prompt_data import fetch_contexto_negocio, fetch_horario_reuniones, fetch_nombres_productos_servicios, format_nombres_para_prompt, fetch_preguntas_frecuentes
+from ... import config as app_config
+from ...logger import get_logger
+from ...services.prompt_data import fetch_contexto_negocio, fetch_horario_reuniones, fetch_nombres_productos_servicios, format_nombres_para_prompt, fetch_preguntas_frecuentes
 
 logger = get_logger(__name__)
 

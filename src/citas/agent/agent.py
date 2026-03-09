@@ -20,7 +20,7 @@ from .. import config as app_config
 from ..tool.tools import AGENT_TOOLS
 from ..logger import get_logger
 from ..metrics import track_chat_response, track_llm_call, record_chat_error, chat_requests_total, AGENT_CACHE, update_cache_stats
-from ..prompts import build_citas_system_prompt
+from .prompts import build_citas_system_prompt
 from .content import CitaStructuredResponse, _build_content
 from .context import _validate_context, _prepare_agent_context
 

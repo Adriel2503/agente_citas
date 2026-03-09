@@ -14,7 +14,7 @@ from ..services.scheduling import ScheduleValidator, ScheduleRecommender, confir
 from ..services.busqueda_productos import buscar_productos_servicios, format_productos_para_respuesta
 from ..logger import get_logger
 from ..metrics import track_tool_execution, record_tool_validation_error
-from ..validation import BookingData, format_validation_error, validate_date_format
+from .validation import BookingData, format_validation_error, validate_date_format
 
 logger = get_logger(__name__)
 

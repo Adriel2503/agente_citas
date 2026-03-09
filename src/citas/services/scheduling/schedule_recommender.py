@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 from ...logger import get_logger
 from ...metrics import track_api_call
 from ... import config as app_config
-from ..infra import post_with_logging, agendar_reunion_cb as _default_agendar_cb, resilient_call, CircuitBreakerProtocol
+from ...infra import post_with_logging, agendar_reunion_cb as _default_agendar_cb, resilient_call, CircuitBreakerProtocol
 from .availability_client import check_slot_availability
 from .time_parser import DIAS_ESPANOL
 
