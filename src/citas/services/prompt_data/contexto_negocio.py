@@ -8,14 +8,15 @@ from typing import Any
 
 from ... import config as app_config
 from ...logger import get_logger
-from ...infra import post_with_logging, informacion_cb as _default_informacion_cb, resilient_call, CircuitBreakerProtocol
+from ...infra import post_with_logging, resilient_call, CircuitBreaker
+from ...config import informacion_cb as _default_informacion_cb
 
 logger = get_logger(__name__)
 
 
 async def fetch_contexto_negocio(
     id_empresa: Any | None,
-    cb: CircuitBreakerProtocol | None = None,
+    cb: CircuitBreaker | None = None,
 ) -> str | None:
     """
     Obtiene el contexto de negocio desde la API para inyectar en el system prompt.

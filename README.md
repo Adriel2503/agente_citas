@@ -702,13 +702,13 @@ async with lock:
 
 **Propósito:** Serializar mensajes concurrentes del mismo usuario. Si el mismo WhatsApp envía dos mensajes antes de recibir respuesta, el segundo espera a que el checkpointer termine de escribir el primero.
 
-**Limpieza:** Cuando `_session_locks` supera 500 entradas, `_cleanup_stale_session_locks()` elimina locks de sesiones que no están actualmente adquiridas (`not lock.locked()`). Evita crecimiento indefinido en sistemas multiempresa con muchos contactos.
+**Limpieza:** Cuando `_session_locks` supera `AGENT_CACHE_MAXSIZE` entradas (default 500), `_cleanup_stale_session_locks()` elimina locks de sesiones que no están actualmente adquiridas (`not lock.locked()`). Evita crecimiento indefinido en sistemas multiempresa con muchos contactos.
 
 ### Locks de cache de agentes (`_agent_cache_locks`)
 
 Misma estrategia para evitar que múltiples sesiones de la misma empresa construyan el agente simultáneamente (thundering herd en el primer request de cada empresa).
 
-**Limpieza:** Umbral de 750 entradas (1.5× el maxsize del TTLCache de 500 agentes).
+**Limpieza:** Umbral de `AGENT_CACHE_MAXSIZE × 1.5` entradas (default 750). Se eliminan locks cuyo agente ya expiró del cache.
 
 ### Paralelismo en `build_citas_system_prompt`
 
@@ -858,10 +858,12 @@ Métricas Prometheus en formato text/plain. Diseñado para ser scrapeado por Pro
 | `SERVER_HOST` | ❌ | `0.0.0.0` | — | Host del servidor uvicorn |
 | `SERVER_PORT` | ❌ | `8002` | 1–65535 | Puerto del servidor |
 | `CHAT_TIMEOUT` | ❌ | `120` | 30–300 seg | Timeout total por request |
-| `API_TIMEOUT` | ❌ | `10` | 1–120 seg | Timeout para APIs externas (httpx) |
+| `API_TIMEOUT` | ❌ | `10` | 1–120 seg | Timeout para APIs externas (httpx read timeout) |
 | `HTTP_RETRY_ATTEMPTS` | ❌ | `3` | 1–10 | Reintentos ante fallo de red |
-| `HTTP_RETRY_WAIT_MIN` | ❌ | `1` | 0–30 seg | Espera mínima entre reintentos |
-| `HTTP_RETRY_WAIT_MAX` | ❌ | `4` | 1–60 seg | Espera máxima entre reintentos |
+| `HTTP_RETRY_WAIT_MIN` | ❌ | `1` | 0–30 seg | Espera mínima entre reintentos (backoff exponencial) |
+| `HTTP_RETRY_WAIT_MAX` | ❌ | `4` | 1–60 seg | Espera máxima entre reintentos (backoff exponencial) |
+| `HTTP_MAX_CONNECTIONS` | ❌ | `50` | 10–500 | Conexiones TCP simultáneas del pool httpx |
+| `HTTP_MAX_KEEPALIVE` | ❌ | `20` | 5–200 | Conexiones TCP en espera (keep-alive) |
 | `AGENT_CACHE_TTL_MINUTES` | ❌ | `60` | 5–1440 min | TTL del agente compilado (system prompt) |
 | `AGENT_CACHE_MAXSIZE` | ❌ | `500` | 10–5000 | Máximo de agentes cacheados (por id_empresa) |
 | `SEARCH_CACHE_TTL_MINUTES` | ❌ | `15` | 1–60 min | TTL del cache de búsqueda de productos |
@@ -869,6 +871,7 @@ Métricas Prometheus en formato text/plain. Diseñado para ser scrapeado por Pro
 | `MAX_MESSAGES_HISTORY` | ❌ | `20` | 4–200 | Ventana de mensajes enviados al LLM |
 | `CB_THRESHOLD` | ❌ | `3` | 1–20 | Errores de red consecutivos para abrir el circuit breaker |
 | `CB_RESET_TTL` | ❌ | `300` | 60–3600 seg | Tiempo de auto-reset del circuit breaker |
+| `CB_MAX_KEYS` | ❌ | `500` | 50–10000 | Máximo de keys (empresas) rastreadas por circuit breaker |
 | `LOG_LEVEL` | ❌ | `INFO` | DEBUG/INFO/WARNING/ERROR/CRITICAL | Nivel de logging |
 | `LOG_FILE` | ❌ | `""` | path | Archivo de log (vacío = solo stdout) |
 | `TIMEZONE` | ❌ | `America/Lima` | zoneinfo key | Zona horaria para fechas en prompts y validaciones |
@@ -879,6 +882,8 @@ Métricas Prometheus en formato text/plain. Diseñado para ser scrapeado por Pro
 | `API_PREGUNTAS_FRECUENTES_URL` | ❌ | `https://api.maravia.pe/.../ws_preguntas_frecuentes.php` | URL | Endpoint para FAQs |
 
 Todas las variables son leídas en `config/config.py` con validación de tipos y fallback al default si el valor es inválido (no lanza excepciones).
+
+> **Guía detallada de configuración:** Para entender qué hace cada variable, cuándo cambiarla y ejemplos de escenarios, ver [`docs/CONFIGURACION.md`](docs/CONFIGURACION.md).
 
 ---
 
@@ -1137,7 +1142,11 @@ Todas las llamadas de **lectura** usan `post_with_logging()` de `infra/http_clie
 ```python
 httpx.AsyncClient(
     timeout=httpx.Timeout(connect=5.0, read=API_TIMEOUT, write=5.0, pool=2.0),
-    limits=httpx.Limits(max_connections=50, max_keepalive_connections=20, keepalive_expiry=30.0),
+    limits=httpx.Limits(
+        max_connections=HTTP_MAX_CONNECTIONS,       # default 50
+        max_keepalive_connections=HTTP_MAX_KEEPALIVE, # default 20
+        keepalive_expiry=30.0,
+    ),
 )
 ```
 

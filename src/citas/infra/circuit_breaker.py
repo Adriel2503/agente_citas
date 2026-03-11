@@ -1,11 +1,5 @@
 """
-Circuit breaker compartido para APIs de MaravIA.
-
-Cuatro singletons de módulo (threshold y reset_ttl desde config CB_*):
-- informacion_cb     → ws_informacion_ia.php      (keyed by id_empresa)
-- preguntas_cb      → ws_preguntas_frecuentes.php (keyed by id_chatbot)
-- calendario_cb     → ws_calendario.php           (key "global")
-- agendar_reunion_cb → ws_agendar_reunion.php     (keyed by id_empresa)
+Circuit breaker genérico para APIs externas.
 
 Lógica: después de `threshold` TransportErrors consecutivos para la misma key,
 el circuit se abre y el servicio retorna fallback inmediatamente sin llamar a la API.
@@ -14,6 +8,8 @@ Un éxito antes de abrir resetea el contador.
 
 IMPORTANTE: solo `record_failure()` ante httpx.TransportError (fallos de red/timeout
 reales). Las respuestas success=false de la API no abren el circuit.
+
+Las instancias concretas se crean en config/circuit_breakers.py.
 """
 
 from typing import Any
@@ -21,7 +17,6 @@ from typing import Any
 from cachetools import TTLCache
 
 from ..logger import get_logger
-from .. import config as app_config
 
 logger = get_logger(__name__)
 
@@ -35,16 +30,17 @@ class CircuitBreaker:
     - Auto-reset: TTLCache expira el conteo de fallos después de `reset_ttl` segundos.
     """
 
-    def __init__(self, name: str, threshold: int = 3, reset_ttl: int = 300):
+    def __init__(self, name: str, threshold: int = 3, reset_ttl: int = 300, max_keys: int = 500):
         """
         Args:
             name: Nombre descriptivo para logging (ej. "ws_informacion_ia").
             threshold: Cantidad de TransportErrors consecutivos para abrir el circuit.
             reset_ttl: Segundos hasta auto-reset del estado (via TTLCache expiry).
+            max_keys: Máximo de keys (empresas/chatbots) rastreadas simultáneamente.
         """
         self.name = name
         self._threshold = threshold
-        self._failures: TTLCache = TTLCache(maxsize=500, ttl=reset_ttl)
+        self._failures: TTLCache = TTLCache(maxsize=max_keys, ttl=reset_ttl)
 
     def is_open(self, key: Any) -> bool:
         """True si el circuit está abierto para esta key → el llamador debe usar fallback."""
@@ -81,68 +77,4 @@ class CircuitBreaker:
         return any(count >= self._threshold for count in self._failures.values())
 
 
-# ---------------------------------------------------------------------------
-# Registro global de circuit breakers
-# ---------------------------------------------------------------------------
-
-_registry: list[CircuitBreaker] = []
-
-
-def _register(cb: CircuitBreaker) -> CircuitBreaker:
-    """Registra un CB en el registro global. Retorna el mismo CB para uso inline."""
-    _registry.append(cb)
-    return cb
-
-
-def get_health_issues() -> list[str]:
-    """
-    Retorna lista de CBs abiertos en formato '{name}_degraded'.
-    Usado por /health para reportar degradación sin enumerar los CBs individualmente.
-    Agregar un nuevo CB solo requiere usar _register() — /health se actualiza solo.
-    """
-    return [f"{cb.name}_degraded" for cb in _registry if cb.any_open()]
-
-
-# ---------------------------------------------------------------------------
-# Singletons compartidos entre servicios
-# ---------------------------------------------------------------------------
-
-# Keyed by id_empresa.
-# Compartido por: horario_reuniones, contexto_negocio, productos_servicios_citas, busqueda_productos, schedule_validator
-informacion_cb: CircuitBreaker = _register(CircuitBreaker(
-    name="ws_informacion_ia",
-    threshold=app_config.CB_THRESHOLD,
-    reset_ttl=app_config.CB_RESET_TTL,
-))
-
-# Keyed by id_chatbot.
-# Usado por: preguntas_frecuentes
-preguntas_cb: CircuitBreaker = _register(CircuitBreaker(
-    name="ws_preguntas_frecuentes",
-    threshold=app_config.CB_THRESHOLD,
-    reset_ttl=app_config.CB_RESET_TTL,
-))
-
-# Key fija "global": ws_calendario.php es un servicio compartido de MaravIA.
-# Si cae, cae para todas las empresas. Fallos por empresa (Google Calendar)
-# llegan como success=false → no abren el circuit.
-# Usado por: booking
-calendario_cb: CircuitBreaker = _register(CircuitBreaker(
-    name="ws_calendario",
-    threshold=app_config.CB_THRESHOLD,
-    reset_ttl=app_config.CB_RESET_TTL,
-))
-
-# Keyed by id_empresa. Lecturas: CONSULTAR_DISPONIBILIDAD, SUGERIR_HORARIOS.
-# Usado por: schedule_validator, schedule_recommender
-agendar_reunion_cb: CircuitBreaker = _register(CircuitBreaker(
-    name="ws_agendar_reunion",
-    threshold=app_config.CB_THRESHOLD,
-    reset_ttl=app_config.CB_RESET_TTL,
-))
-
-__all__ = [
-    "CircuitBreaker",
-    "informacion_cb", "preguntas_cb", "calendario_cb", "agendar_reunion_cb",
-    "get_health_issues",
-]
+__all__ = ["CircuitBreaker"]

@@ -1,6 +1,4 @@
-"""
-Configuración del agente de citas. Re-exporta variables de config y modelos.
-"""
+"""Re-exporta la configuración del agente de citas (env, timeouts, URLs, circuit breakers)."""
 
 from .config import (
     OPENAI_API_KEY,
@@ -24,6 +22,9 @@ from .config import (
     HTTP_RETRY_WAIT_MAX,
     CB_THRESHOLD,
     CB_RESET_TTL,
+    CB_MAX_KEYS,
+    HTTP_MAX_CONNECTIONS,
+    HTTP_MAX_KEEPALIVE,
     REDIS_URL,
     API_CALENDAR_URL,
     API_AGENDAR_REUNION_URL,
@@ -31,6 +32,14 @@ from .config import (
     API_PREGUNTAS_FRECUENTES_URL,
     TIMEZONE,
 )
+from .circuit_breakers import (
+    informacion_cb,
+    preguntas_cb,
+    calendario_cb,
+    agendar_reunion_cb,
+    get_health_issues,
+)
+
 __all__ = [
     "OPENAI_API_KEY",
     "OPENAI_MODEL",
@@ -58,5 +67,13 @@ __all__ = [
     "HTTP_RETRY_WAIT_MAX",
     "CB_THRESHOLD",
     "CB_RESET_TTL",
+    "CB_MAX_KEYS",
+    "HTTP_MAX_CONNECTIONS",
+    "HTTP_MAX_KEEPALIVE",
     "REDIS_URL",
+    "informacion_cb",
+    "preguntas_cb",
+    "calendario_cb",
+    "agendar_reunion_cb",
+    "get_health_issues",
 ]

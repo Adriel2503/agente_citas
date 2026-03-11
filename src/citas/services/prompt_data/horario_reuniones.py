@@ -8,7 +8,8 @@ from typing import Any
 
 from ... import config as app_config
 from ...logger import get_logger
-from ...infra import post_with_logging, informacion_cb as _default_informacion_cb, resilient_call, CircuitBreakerProtocol
+from ...infra import post_with_logging, resilient_call, CircuitBreaker
+from ...config import informacion_cb as _default_informacion_cb
 from ..scheduling.time_parser import DIAS_ORDEN
 
 logger = get_logger(__name__)
@@ -45,7 +46,7 @@ def format_horario_for_system_prompt(horario_reuniones: dict[str, Any]) -> str:
 
 async def fetch_horario_reuniones(
     id_empresa: Any | None,
-    cb: CircuitBreakerProtocol | None = None,
+    cb: CircuitBreaker | None = None,
 ) -> str:
     """
     Obtiene el horario de reuniones desde la API y lo devuelve formateado

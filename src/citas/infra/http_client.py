@@ -38,8 +38,8 @@ def get_client() -> httpx.AsyncClient:
                 pool=2.0,
             ),
             limits=httpx.Limits(
-                max_connections=50,
-                max_keepalive_connections=20,
+                max_connections=app_config.HTTP_MAX_CONNECTIONS,
+                max_keepalive_connections=app_config.HTTP_MAX_KEEPALIVE,
                 keepalive_expiry=30.0,
             ),
             headers={"Content-Type": "application/json", "Accept": "application/json"},
@@ -61,7 +61,7 @@ async def close_http_client() -> None:
     retry=retry_if_exception_type(httpx.TransportError),
     reraise=True,
 )
-async def post_with_retry(url: str, json: dict[str, Any]) -> dict[str, Any]:
+async def post_with_retry(url: str, payload: dict[str, Any]) -> dict[str, Any]:
     """
     POST con retry automático para errores de red transitoria.
 
@@ -77,7 +77,7 @@ async def post_with_retry(url: str, json: dict[str, Any]) -> dict[str, Any]:
     Para escrituras (ej. CREAR_EVENTO) usar client.post() directamente.
     """
     client = get_client()
-    response = await client.post(url, json=json)
+    response = await client.post(url, json=payload)
     response.raise_for_status()
     return response.json()
 
@@ -103,7 +103,7 @@ async def post_with_logging(url: str, payload: dict[str, Any]) -> dict[str, Any]
             logger.debug("[API] Response (codOpe=%s): %s", cod_ope, json.dumps(data, ensure_ascii=False))
         return data
     except (httpx.HTTPStatusError, httpx.TransportError) as e:
-        logger.warning("[API] %s (codOpe=%s): %s", type(e).__name__, cod_ope, e)
+        logger.debug("[API] %s (codOpe=%s): %s", type(e).__name__, cod_ope, e)
         raise
     except Exception as e:
         logger.error(

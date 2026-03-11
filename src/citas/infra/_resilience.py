@@ -1,40 +1,32 @@
 """
 Helper de resiliencia compartido: circuit breaker.
 
-El retry ya lo maneja tenacity en post_with_logging (http_client.py).
+El retry ya lo maneja tenacity en post_with_retry (http_client.py).
 Este módulo solo se ocupa de verificar/actualizar el estado del CB.
 
 Uso:
-    from .circuit_breaker import informacion_cb
-
     data = await resilient_call(
-        lambda: post_with_logging(app_config.API_INFORMACION_URL, payload),
-        cb=informacion_cb,
-        circuit_key=id_empresa,
+        lambda: post_with_logging(url, payload),
+        cb=my_circuit_breaker,
+        circuit_key=some_key,
         service_name="MI_SERVICIO",
     )
     # Lanza RuntimeError si circuit abierto, o la excepción original si la llamada falla.
 """
 
-from typing import Any, Awaitable, Callable, Protocol
+from typing import Any, Awaitable, Callable
 
 import httpx
 
+from .circuit_breaker import CircuitBreaker
 from ..logger import get_logger
 
 logger = get_logger(__name__)
 
 
-class CircuitBreakerProtocol(Protocol):
-    """Interfaz mínima que debe satisfacer cualquier circuit breaker."""
-    def is_open(self, key: Any) -> bool: ...
-    def record_failure(self, key: Any) -> None: ...
-    def record_success(self, key: Any) -> None: ...
-
-
 async def resilient_call(
     coro_factory: Callable[[], Awaitable[Any]],
-    cb: CircuitBreakerProtocol,
+    cb: CircuitBreaker,
     circuit_key: Any,
     service_name: str,
 ) -> Any:
@@ -47,7 +39,7 @@ async def resilient_call(
     - Otros errores (HTTPStatusError, etc.) → re-lanza sin afectar el CB.
 
     El retry ante fallos de red transitorios lo maneja tenacity dentro de
-    post_with_logging (http_client.py); este wrapper solo gestiona el CB.
+    post_with_retry (http_client.py); este wrapper solo gestiona el CB.
 
     Args:
         coro_factory:  Callable sin argumentos que retorna una coroutine.
@@ -61,7 +53,7 @@ async def resilient_call(
         Exception: cualquier otro error de la coroutine (CB no afectado).
     """
     if cb.is_open(circuit_key):
-        logger.warning(
+        logger.debug(
             "[%s] Circuit ABIERTO key=%s — llamada rechazada sin tocar la red",
             service_name, circuit_key,
         )
@@ -74,7 +66,7 @@ async def resilient_call(
         cb.record_success(circuit_key)
         return result
     except httpx.TransportError as exc:
-        logger.warning(
+        logger.debug(
             "[%s] TransportError key=%s: %s",
             service_name, circuit_key, exc,
         )
@@ -82,4 +74,4 @@ async def resilient_call(
         raise
 
 
-__all__ = ["resilient_call", "CircuitBreakerProtocol"]
+__all__ = ["resilient_call"]

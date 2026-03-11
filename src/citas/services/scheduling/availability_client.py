@@ -13,7 +13,8 @@ from typing import Any
 from ...logger import get_logger
 from ...metrics import track_api_call, degradation_total
 from ... import config as app_config
-from ...infra import post_with_logging, agendar_reunion_cb as _default_agendar_cb, resilient_call, CircuitBreakerProtocol
+from ...infra import post_with_logging, resilient_call, CircuitBreaker
+from ...config import agendar_reunion_cb as _default_agendar_cb
 from .time_parser import parse_time
 
 logger = get_logger(__name__)
@@ -28,7 +29,7 @@ async def check_slot_availability(
     agendar_usuario: int,
     agendar_sucursal: int,
     log_api: bool = False,
-    cb: CircuitBreakerProtocol | None = None,
+    cb: CircuitBreaker | None = None,
 ) -> dict[str, Any]:
     """
     Consulta CONSULTAR_DISPONIBILIDAD en ws_agendar_reunion.php.

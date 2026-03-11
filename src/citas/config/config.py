@@ -32,8 +32,7 @@ load_dotenv(_find_env_path())
 
 def _get_str(key: str, default: str) -> str:
     """Obtiene variable de entorno como string."""
-    value = os.getenv(key, default)
-    return value.strip() if isinstance(value, str) else str(default)
+    return os.getenv(key, default).strip()
 
 
 def _get_int(
@@ -129,6 +128,13 @@ HTTP_RETRY_WAIT_MAX: int = _get_int("HTTP_RETRY_WAIT_MAX", 4, min_val=1, max_val
 # ---------------------------------------------------------------------------
 CB_THRESHOLD: int = _get_int("CB_THRESHOLD", 3, min_val=1, max_val=20)
 CB_RESET_TTL: int = _get_int("CB_RESET_TTL", 300, min_val=60, max_val=3600)
+CB_MAX_KEYS: int = _get_int("CB_MAX_KEYS", 500, min_val=50, max_val=10000)
+
+# ---------------------------------------------------------------------------
+# HTTP connection pool
+# ---------------------------------------------------------------------------
+HTTP_MAX_CONNECTIONS: int = _get_int("HTTP_MAX_CONNECTIONS", 50, min_val=10, max_val=500)
+HTTP_MAX_KEEPALIVE: int = _get_int("HTTP_MAX_KEEPALIVE", 20, min_val=5, max_val=200)
 
 # ---------------------------------------------------------------------------
 # Cache

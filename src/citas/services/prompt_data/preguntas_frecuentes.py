@@ -8,7 +8,8 @@ from typing import Any
 
 from ... import config as app_config
 from ...logger import get_logger
-from ...infra import post_with_logging, preguntas_cb as _default_preguntas_cb, resilient_call, CircuitBreakerProtocol
+from ...infra import post_with_logging, resilient_call, CircuitBreaker
+from ...config import preguntas_cb as _default_preguntas_cb
 
 logger = get_logger(__name__)
 
@@ -48,7 +49,7 @@ def format_preguntas_frecuentes_para_prompt(items: list[dict[str, Any]]) -> str:
 
 async def fetch_preguntas_frecuentes(
     id_chatbot: Any | None,
-    cb: CircuitBreakerProtocol | None = None,
+    cb: CircuitBreaker | None = None,
 ) -> str:
     """
     Obtiene las preguntas frecuentes desde la API para inyectar en el system prompt.

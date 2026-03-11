@@ -9,7 +9,8 @@ from typing import Any
 
 from ... import config as app_config
 from ...logger import get_logger
-from ...infra import post_with_logging, informacion_cb as _default_informacion_cb, resilient_call, CircuitBreakerProtocol
+from ...infra import post_with_logging, resilient_call, CircuitBreaker
+from ...config import informacion_cb as _default_informacion_cb
 
 logger = get_logger(__name__)
 
@@ -17,7 +18,7 @@ _MAX_PRODUCTOS = 10
 _MAX_SERVICIOS = 10
 
 
-async def _fetch_nombres(cod_ope: str, id_empresa: Any, max_items: int, response_key: str, cb: CircuitBreakerProtocol) -> list[str]:
+async def _fetch_nombres(cod_ope: str, id_empresa: Any, max_items: int, response_key: str, cb: CircuitBreaker) -> list[str]:
     """
     Obtiene una lista de la API y extrae solo los nombres.
 
@@ -69,7 +70,7 @@ async def _fetch_nombres(cod_ope: str, id_empresa: Any, max_items: int, response
 
 async def fetch_nombres_productos_servicios(
     id_empresa: Any | None,
-    cb: CircuitBreakerProtocol | None = None,
+    cb: CircuitBreaker | None = None,
 ) -> tuple[list[str], list[str]]:
     """
     Obtiene listas de nombres de productos y servicios (máx 10 de cada) en paralelo.

@@ -52,7 +52,7 @@ _model = None
 # agent.ainvoke sobre el mismo thread_id del checkpointer en paralelo.
 # Crece con cada sesión nueva; se limpia cuando supera _SESSION_LOCKS_CLEANUP_THRESHOLD.
 _session_locks: dict[int, asyncio.Lock] = {}
-_SESSION_LOCKS_CLEANUP_THRESHOLD = 500  # multiempresa: muchas sesiones; limpieza periódica
+_SESSION_LOCKS_CLEANUP_THRESHOLD = app_config.AGENT_CACHE_MAXSIZE  # escala con el tamaño de cache
 
 # Cache de agentes compilados: clave = id_empresa.
 # TTL independiente del cache de horarios: el system prompt (contexto negocio, FAQs,
@@ -65,7 +65,7 @@ _agent_cache: TTLCache = TTLCache(
 # Un lock por cache_key para evitar thundering herd al crear el agente por primera vez.
 # Crece con cada id_empresa nuevo; se limpia cuando supera _LOCKS_CLEANUP_THRESHOLD.
 _agent_cache_locks: dict[tuple, asyncio.Lock] = {}
-_LOCKS_CLEANUP_THRESHOLD = 750  # 1.5x cache maxsize; si se supera, se eliminan locks huérfanos
+_LOCKS_CLEANUP_THRESHOLD = int(app_config.AGENT_CACHE_MAXSIZE * 1.5)  # 1.5x cache maxsize
 
 def _cleanup_stale_agent_locks(current_cache_key: tuple) -> None:
     """

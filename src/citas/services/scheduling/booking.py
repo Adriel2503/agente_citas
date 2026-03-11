@@ -12,7 +12,8 @@ from typing import Any
 from ...logger import get_logger
 from ...metrics import track_api_call, record_booking_attempt, record_booking_success, record_booking_failure
 from ... import config as app_config
-from ...infra import get_client, calendario_cb
+from ...infra import get_client
+from ...config import calendario_cb
 from .time_parser import build_fecha_inicio_fin
 
 logger = get_logger(__name__)

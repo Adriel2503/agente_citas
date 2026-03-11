@@ -15,7 +15,8 @@ from zoneinfo import ZoneInfo
 from ...logger import get_logger
 from ...metrics import track_api_call
 from ... import config as app_config
-from ...infra import post_with_logging, agendar_reunion_cb as _default_agendar_cb, resilient_call, CircuitBreakerProtocol
+from ...infra import post_with_logging, resilient_call, CircuitBreaker
+from ...config import agendar_reunion_cb as _default_agendar_cb
 from .availability_client import check_slot_availability
 from .time_parser import DIAS_ESPANOL
 
@@ -34,7 +35,7 @@ class ScheduleRecommender:
         slots: int,
         agendar_usuario: int = 0,
         agendar_sucursal: int = 0,
-        agendar_cb: CircuitBreakerProtocol | None = None,
+        agendar_cb: CircuitBreaker | None = None,
     ):
         self.id_empresa = id_empresa
         self.duracion_cita = timedelta(minutes=duracion_cita_minutos)
