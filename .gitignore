@@ -7,15 +7,25 @@ __pycache__/
 env/
 venv/
 venv_agent_citas
+.venv/
 ENV/
 build/
 dist/
 *.egg-info/
+.eggs/
+
+# uv (package manager)
+uv.lock
+.uv/
 .claude 
 .agents
 # Environment
 .env
 .env.local
+.env.*.local
+.env.development
+.env.test
+.env.production
 
 # IDE
 .vscode/
@@ -36,6 +46,14 @@ logs/
 .pytest_cache/
 .coverage
 htmlcov/
+.tox/
+nox/
+
+# Linting / type checking
+.ruff_cache/
+.mypy_cache/
+.dmypy.json
+dmypy.json
 
 .tmpcache/
 
