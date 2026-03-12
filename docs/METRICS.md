@@ -3,10 +3,7 @@
 El agente expone **19 metricas** en `GET /metrics` (puerto 8002) via `prometheus_client`.
 Formato: Prometheus text/plain.
 
-Dos prefijos de nombres:
-
-- **`agent_citas_`** — metricas de negocio (chat, bookings, tools, LLM)
-- **`citas_`** — metricas de infraestructura (HTTP, caches, degradacion)
+Prefijo unico: **`citas_`** para todas las metricas (negocio e infraestructura).
 
 > Config de scraping: ver [DEPLOYMENT.md](DEPLOYMENT.md).
 > Descripcion del endpoint: ver [API.md](API.md).
@@ -19,14 +16,14 @@ Dos prefijos de nombres:
 
 | Nombre | Labels | Descripcion |
 |--------|--------|-------------|
-| `agent_citas_chat_requests_total` | `empresa_id` | Mensajes recibidos por el agente |
-| `agent_citas_chat_errors_total` | `error_type` | Errores procesando mensajes |
-| `agent_citas_booking_attempts_total` | — | Intentos de crear cita |
-| `agent_citas_booking_success_total` | — | Citas creadas exitosamente |
-| `agent_citas_booking_failed_total` | `reason` | Citas fallidas |
-| `agent_citas_tool_calls_total` | `tool_name` | Llamadas a tools del agente |
-| `agent_citas_tool_errors_total` | `tool_name`, `error_type` | Errores en tools |
-| `agent_citas_api_calls_total` | `endpoint`, `status` | Llamadas a APIs externas MaravIA |
+| `citas_chat_requests_total` | `empresa_id` | Mensajes recibidos por el agente |
+| `citas_chat_errors_total` | `error_type` | Errores procesando mensajes |
+| `citas_booking_attempts_total` | — | Intentos de crear cita |
+| `citas_booking_success_total` | — | Citas creadas exitosamente |
+| `citas_booking_failed_total` | `reason` | Citas fallidas |
+| `citas_tool_calls_total` | `tool_name` | Llamadas a tools del agente |
+| `citas_tool_errors_total` | `tool_name`, `error_type` | Errores en tools |
+| `citas_api_calls_total` | `endpoint`, `status` | Llamadas a APIs externas MaravIA |
 | `citas_http_requests_total` | `status` | Requests HTTP al endpoint /api/chat |
 | `citas_agent_cache_total` | `result` | Hits/misses del cache de agente |
 | `citas_search_cache_total` | `result` | Hits/misses del cache de busqueda |
@@ -37,10 +34,10 @@ Dos prefijos de nombres:
 | Nombre | Labels | Descripcion | Buckets (s) |
 |--------|--------|-------------|-------------|
 | `citas_http_duration_seconds` | — | Latencia total /api/chat | 0.25, 0.5, 1, 2.5, 5, 10, 20, 30, 60, 90, 120 |
-| `agent_citas_chat_response_duration_seconds` | `status` | Tiempo de respuesta del agente | 0.1, 0.5, 1, 2, 5, 10, 30, 60, 90 |
-| `agent_citas_tool_execution_duration_seconds` | `tool_name` | Latencia por tool | 0.1, 0.5, 1, 2, 5, 10, 20, 30 |
-| `agent_citas_api_call_duration_seconds` | `endpoint` | Latencia de APIs externas | 0.1, 0.25, 0.5, 1, 2.5, 5, 10 |
-| `agent_citas_llm_call_duration_seconds` | `status` | Latencia de llamadas a OpenAI | 0.5, 1, 2, 5, 10, 20, 30, 60, 90 |
+| `citas_chat_response_duration_seconds` | `status` | Tiempo de respuesta del agente | 0.1, 0.5, 1, 2, 5, 10, 30, 60, 90 |
+| `citas_tool_execution_duration_seconds` | `tool_name` | Latencia por tool | 0.1, 0.5, 1, 2, 5, 10, 20, 30 |
+| `citas_api_call_duration_seconds` | `endpoint` | Latencia de APIs externas | 0.1, 0.25, 0.5, 1, 2.5, 5, 10 |
+| `citas_llm_call_duration_seconds` | `status` | Latencia de llamadas a OpenAI | 0.5, 1, 2, 5, 10, 20, 30, 60, 90 |
 
 Cada histograma genera 3 series: `_bucket`, `_sum`, `_count`.
 
@@ -48,13 +45,13 @@ Cada histograma genera 3 series: `_bucket`, `_sum`, `_count`.
 
 | Nombre | Labels | Descripcion |
 |--------|--------|-------------|
-| `agent_citas_cache_entries` | `cache_type` | Entradas actuales en cache |
+| `citas_cache_entries` | `cache_type` | Entradas actuales en cache |
 
 ### Info (1)
 
 | Nombre | Campos | Descripcion |
 |--------|--------|-------------|
-| `agent_citas_info` | `version`, `model`, `agent_type` | Metadata del agente |
+| `citas_info` | `version`, `model`, `agent_type` | Metadata del agente |
 
 ---
 
@@ -165,18 +162,18 @@ Cada histograma genera 3 series: `_bucket`, `_sum`, `_count`.
 rate(citas_http_requests_total[5m])
 
 # Mensajes por empresa por minuto
-rate(agent_citas_chat_requests_total{empresa_id="123"}[5m]) * 60
+rate(citas_chat_requests_total{empresa_id="123"}[5m]) * 60
 ```
 
 ### Tasa de exito de citas
 
 ```promql
 # Booking success rate (ultima hora)
-rate(agent_citas_booking_success_total[1h])
-  / rate(agent_citas_booking_attempts_total[1h])
+rate(citas_booking_success_total[1h])
+  / rate(citas_booking_attempts_total[1h])
 
 # Fallo por razon
-sum by (reason) (rate(agent_citas_booking_failed_total[1h]))
+sum by (reason) (rate(citas_booking_failed_total[1h]))
 ```
 
 ### Tasa de error
@@ -187,8 +184,8 @@ sum(rate(citas_http_requests_total{status=~"timeout|error"}[5m]))
   / sum(rate(citas_http_requests_total[5m]))
 
 # Error rate por tool
-sum by (tool_name) (rate(agent_citas_tool_errors_total[5m]))
-  / sum by (tool_name) (rate(agent_citas_tool_calls_total[5m]))
+sum by (tool_name) (rate(citas_tool_errors_total[5m]))
+  / sum by (tool_name) (rate(citas_tool_calls_total[5m]))
 ```
 
 ### Hit rate de caches
@@ -211,16 +208,16 @@ rate(citas_http_duration_seconds_sum[5m])
   / rate(citas_http_duration_seconds_count[5m])
 
 # Latencia promedio LLM
-rate(agent_citas_llm_call_duration_seconds_sum[5m])
-  / rate(agent_citas_llm_call_duration_seconds_count[5m])
+rate(citas_llm_call_duration_seconds_sum[5m])
+  / rate(citas_llm_call_duration_seconds_count[5m])
 
 # Latencia promedio por tool
-rate(agent_citas_tool_execution_duration_seconds_sum[5m])
-  / rate(agent_citas_tool_execution_duration_seconds_count[5m])
+rate(citas_tool_execution_duration_seconds_sum[5m])
+  / rate(citas_tool_execution_duration_seconds_count[5m])
 
 # Latencia promedio APIs externas
-rate(agent_citas_api_call_duration_seconds_sum[5m])
-  / rate(agent_citas_api_call_duration_seconds_count[5m])
+rate(citas_api_call_duration_seconds_sum[5m])
+  / rate(citas_api_call_duration_seconds_count[5m])
 ```
 
 ### Percentiles
@@ -230,7 +227,7 @@ rate(agent_citas_api_call_duration_seconds_sum[5m])
 histogram_quantile(0.95, rate(citas_http_duration_seconds_bucket[5m]))
 
 # p50 latencia LLM
-histogram_quantile(0.50, rate(agent_citas_llm_call_duration_seconds_bucket[5m]))
+histogram_quantile(0.50, rate(citas_llm_call_duration_seconds_bucket[5m]))
 
 # p99 latencia /api/chat
 histogram_quantile(0.99, rate(citas_http_duration_seconds_bucket[5m]))
@@ -238,7 +235,7 @@ histogram_quantile(0.99, rate(citas_http_duration_seconds_bucket[5m]))
 # p95 por tool
 histogram_quantile(0.95,
   sum by (le, tool_name) (
-    rate(agent_citas_tool_execution_duration_seconds_bucket[5m])
+    rate(citas_tool_execution_duration_seconds_bucket[5m])
   )
 )
 ```
@@ -254,7 +251,7 @@ rate(citas_availability_degradation_total[5m]) > 0
 sum by (service, reason) (rate(citas_availability_degradation_total[5m]))
 
 # ALERTA: circuit breaker bloqueando bookings
-increase(agent_citas_booking_failed_total{reason="circuit_open"}[5m]) > 0
+increase(citas_booking_failed_total{reason="circuit_open"}[5m]) > 0
 
 # ALERTA: p95 > 10s
 histogram_quantile(0.95, rate(citas_http_duration_seconds_bucket[5m])) > 10
@@ -268,23 +265,23 @@ sum(rate(citas_http_requests_total{status="timeout"}[5m]))
 
 ```promql
 # Total mensajes (todas las empresas)
-sum(agent_citas_chat_requests_total)
+sum(citas_chat_requests_total)
 
 # Total citas exitosas
-agent_citas_booking_success_total
+citas_booking_success_total
 
 # Entradas actuales en caches
-agent_citas_cache_entries
+citas_cache_entries
 ```
 
 ### Desglose por empresa
 
 ```promql
 # Top 10 empresas mas activas (ultima hora)
-topk(10, increase(agent_citas_chat_requests_total[1h]))
+topk(10, increase(citas_chat_requests_total[1h]))
 
 # Mensajes por empresa por minuto
-sum by (empresa_id) (rate(agent_citas_chat_requests_total[5m])) * 60
+sum by (empresa_id) (rate(citas_chat_requests_total[5m])) * 60
 ```
 
 ---
