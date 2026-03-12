@@ -10,7 +10,7 @@ import openai
 from langchain.agents import create_agent
 
 from ..infra.llm import get_model, get_checkpointer
-from ..tool.tools import AGENT_TOOLS
+from ..tools.tools import AGENT_TOOLS
 from ..logger import get_logger
 from ..metrics import track_chat_response, track_llm_call, record_chat_error, chat_requests_total, AGENT_CACHE, update_cache_stats
 from .prompts import build_citas_system_prompt
