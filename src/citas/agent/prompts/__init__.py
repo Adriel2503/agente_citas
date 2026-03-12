@@ -4,7 +4,6 @@ Prompts del agente de citas. Builder del system prompt.
 
 import asyncio
 from pathlib import Path
-from typing import Any
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -12,6 +11,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from ... import config as app_config
 from ...logger import get_logger
+from ...schemas import CitasConfig
 from ...services.prompt_data import fetch_contexto_negocio, fetch_horario_reuniones, fetch_nombres_productos_servicios, format_nombres_para_prompt, fetch_preguntas_frecuentes
 
 logger = get_logger(__name__)
@@ -25,10 +25,6 @@ _MESES_ESPANOL = [
     "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
 ]
 
-_DEFAULTS: dict[str, Any] = {
-    "personalidad": "amable, profesional y eficiente",
-}
-
 _jinja_env = Environment(
     loader=FileSystemLoader(str(_TEMPLATES_DIR)),
     autoescape=select_autoescape(disabled_extensions=()),
@@ -41,33 +37,24 @@ def _now_peru() -> datetime:
     return datetime.now(_ZONA_PERU)
 
 
-def _apply_defaults(config: dict[str, Any]) -> dict[str, Any]:
-    """Aplica valores por defecto a la configuración."""
-    out = dict(_DEFAULTS)
-    for k, v in config.items():
-        if v is not None and v != "" and v != []:
-            out[k] = v
-    return out
-
-
 async def build_citas_system_prompt(
-    config: dict[str, Any],
+    config: CitasConfig,
 ) -> str:
     """
     Construye el system prompt del agente de citas.
 
     Args:
-        config: Diccionario con id_empresa (requerido) y resto de configuración del agente (personalidad, nombre, etc.).
+        config: CitasConfig validado por Pydantic.
 
     Returns:
         System prompt renderizado.
     """
-    variables = _apply_defaults(config)
-    variables["archivo_saludo"] = (config.get("archivo_saludo") or "").strip()
+    variables = config.model_dump(exclude_none=True)
+    variables["archivo_saludo"] = (config.archivo_saludo or "").strip()
 
     # Fecha y hora actual en Perú (para que el agente sepa "hoy" y "mañana")
     now = _now_peru()
-    variables["fecha_iso"] = variables.get("fecha_iso") or now.strftime("%Y-%m-%d")
+    variables["fecha_iso"] = now.strftime("%Y-%m-%d")
     variables["hora_actual"] = now.strftime("%I:%M %p")
     dia_nombre = _DIAS_ESPANOL[now.weekday()]
     mes_nombre = _MESES_ESPANOL[now.month - 1]
@@ -80,13 +67,11 @@ async def build_citas_system_prompt(
     )
 
     # Cargar horario, productos/servicios, contexto de negocio y preguntas frecuentes en paralelo
-    id_empresa = config.get("id_empresa")
-    id_chatbot = config.get("id_chatbot")
     results = await asyncio.gather(
-        fetch_horario_reuniones(id_empresa),
-        fetch_nombres_productos_servicios(id_empresa),
-        fetch_contexto_negocio(id_empresa),
-        fetch_preguntas_frecuentes(id_chatbot),
+        fetch_horario_reuniones(config.id_empresa),
+        fetch_nombres_productos_servicios(config.id_empresa),
+        fetch_contexto_negocio(config.id_empresa),
+        fetch_preguntas_frecuentes(config.id_chatbot),
         return_exceptions=True,
     )
 

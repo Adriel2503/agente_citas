@@ -3,8 +3,6 @@ Lógica del agente especializado en citas usando LangChain 1.2+ API moderna.
 Versión mejorada con logging, métricas, configuración centralizada y memoria automática.
 """
 
-from typing import Any
-
 import openai
 
 from langchain.agents import create_agent
@@ -20,7 +18,8 @@ from ..logger import get_logger
 from ..metrics import track_chat_response, track_llm_call, record_chat_error, chat_requests_total, AGENT_CACHE, update_cache_stats
 from .prompts import build_citas_system_prompt
 from .content import CitaStructuredResponse, _build_content
-from .context import _validate_context, _prepare_agent_context
+from .context import _prepare_agent_context
+from ..schemas import CitasConfig
 
 logger = get_logger(__name__)
 
@@ -34,7 +33,7 @@ _OPENAI_ERRORS: dict[type, tuple[str, str, str, str]] = {
 }
 
 
-async def _get_agent(config: dict[str, Any]):
+async def _get_agent(config: CitasConfig):
     """
     Devuelve el agente compilado para id_empresa.
 
@@ -48,12 +47,12 @@ async def _get_agent(config: dict[str, Any]):
     concurrentemente (thundering herd).
 
     Args:
-        config: Diccionario con configuración del agente (id_empresa requerido; personalidad, nombre, etc. opcionales).
+        config: CitasConfig con configuración del agente (id_empresa requerido; personalidad, nombre, etc. opcionales).
 
     Returns:
         Agente configurado con tools y checkpointer
     """
-    cache_key: tuple = (config.get("id_empresa"),)
+    cache_key: tuple = (config.id_empresa,)
 
     # Fast path: cache hit (sin await, atómico en asyncio single-thread)
     cached = get_cached_agent(cache_key)
@@ -107,7 +106,7 @@ async def _get_agent(config: dict[str, Any]):
 async def process_cita_message(
     message: str,
     session_id: int,
-    config: dict[str, Any],
+    config: CitasConfig,
 ) -> tuple[str, str | None]:
     """
     Procesa un mensaje del cliente sobre citas/reuniones usando LangChain 1.2+ Agent.
@@ -146,32 +145,21 @@ async def process_cita_message(
         raise ValueError("session_id es requerido (entero no negativo)")
 
     # Registrar request con label de baja cardinalidad (por empresa, no por sesión)
-    _empresa_id = str(config.get("id_empresa", "unknown"))
+    _empresa_id = str(config.id_empresa)
     chat_requests_total.labels(empresa_id=_empresa_id).inc()
 
     # Serializar requests concurrentes del mismo usuario para evitar condiciones
     # de carrera sobre el mismo thread_id del checkpointer (InMemorySaver).
     lock = acquire_session_lock(session_id)
     async with lock:
-        # Validar config
         try:
-            _validate_context(config)
-        except ValueError as e:
-            logger.error("[AGENT] Error de config: %s", e)
-            record_chat_error("context_error")
-            return (f"Error de configuración: {str(e)}", None)
-
-        config_data = dict(config)
-        config_data.setdefault("personalidad", "amable, profesional y eficiente")
-
-        try:
-            agent = await _get_agent(config_data)
+            agent = await _get_agent(config)
         except Exception as e:
             logger.error("[AGENT] Error creando agent: %s", e, exc_info=True)
             record_chat_error("agent_creation_error")
             return ("Disculpa, tuve un problema de configuración. ¿Podrías intentar nuevamente?", None)
 
-        agent_context = _prepare_agent_context(config_data, session_id)
+        agent_context = _prepare_agent_context(config, session_id)
 
         # LangGraph checkpointer usa thread_id como str
         run_config = {

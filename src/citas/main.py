@@ -9,12 +9,10 @@ import asyncio
 import logging
 import time
 from contextlib import asynccontextmanager
-from typing import Any
 
 import uvicorn
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
 from prometheus_client import make_asgi_app
 
 from . import config as app_config, __version__
@@ -23,6 +21,7 @@ from .logger import setup_logging, get_logger
 from .metrics import initialize_agent_info, HTTP_REQUESTS, HTTP_DURATION
 from .infra import close_http_client
 from .config import get_health_issues
+from .schemas import ChatRequest, ChatResponse
 
 # Configurar logging antes de cualquier otra cosa
 log_level = getattr(logging, app_config.LOG_LEVEL.upper(), logging.INFO)
@@ -35,21 +34,6 @@ logger = get_logger(__name__)
 
 # Inicializar información del agente para métricas
 initialize_agent_info(model=app_config.OPENAI_MODEL, version=__version__)
-
-
-# ---------------------------------------------------------------------------
-# Modelos Pydantic
-# ---------------------------------------------------------------------------
-
-class ChatRequest(BaseModel):
-    message: str = Field(..., min_length=1, max_length=4096)
-    session_id: int
-    config: dict[str, Any] | None = None
-
-
-class ChatResponse(BaseModel):
-    reply: str
-    url: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -111,11 +95,16 @@ async def chat(req: ChatRequest) -> ChatResponse:
     Returns:
         JSON con campo reply: respuesta del agente
     """
-    config = req.config or {}
+    config = req.config
+    if config is None:
+        return ChatResponse(
+            reply="Error de configuración: config es requerido con al menos id_empresa.",
+            url=None,
+        )
 
     logger.info("[HTTP] Mensaje recibido - Session: %s, Length: %s chars", req.session_id, len(req.message))
     logger.debug("[HTTP] Message: %s...", req.message[:100])
-    logger.debug("[HTTP] Config keys: %s", list(config.keys()))
+    logger.debug("[HTTP] Config fields: %s", config.model_fields_set)
 
     _start = time.perf_counter()
     _http_status = "success"
