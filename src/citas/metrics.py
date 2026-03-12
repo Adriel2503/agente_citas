@@ -34,27 +34,27 @@ booking_success_total = Counter(
 )
 
 booking_failed_total = Counter(
-    'agent_citas_booking_failed_total',
+    'citas_booking_failed_total',
     'Total de citas fallidas',
     ['reason']
 )
 
 # Tools
 tool_calls_total = Counter(
-    'agent_citas_tool_calls_total',
+    'citas_tool_calls_total',
     'Total de llamadas a tools',
     ['tool_name']
 )
 
 tool_errors_total = Counter(
-    'agent_citas_tool_errors_total',
+    'citas_tool_errors_total',
     'Total de errores en tools',
     ['tool_name', 'error_type']
 )
 
 # API calls
 api_calls_total = Counter(
-    'agent_citas_api_calls_total',
+    'citas_api_calls_total',
     'Total de llamadas a APIs externas',
     ['endpoint', 'status']
 )
@@ -99,28 +99,28 @@ HTTP_DURATION = Histogram(
 )
 
 chat_response_duration_seconds = Histogram(
-    'agent_citas_chat_response_duration_seconds',
+    'citas_chat_response_duration_seconds',
     'Tiempo de respuesta del chat en segundos',
     ['status'],
     buckets=(0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 90.0)
 )
 
 tool_execution_duration_seconds = Histogram(
-    'agent_citas_tool_execution_duration_seconds',
+    'citas_tool_execution_duration_seconds',
     'Tiempo de ejecución de tools en segundos',
     ['tool_name'],
     buckets=(0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 30.0)
 )
 
 api_call_duration_seconds = Histogram(
-    'agent_citas_api_call_duration_seconds',
+    'citas_api_call_duration_seconds',
     'Tiempo de llamadas a API en segundos',
     ['endpoint'],
     buckets=(0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0)
 )
 
 llm_call_duration_seconds = Histogram(
-    'agent_citas_llm_call_duration_seconds',
+    'citas_llm_call_duration_seconds',
     'Tiempo de llamadas al LLM en segundos',
     ['status'],
     buckets=(0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 30.0, 60.0, 90.0)
@@ -129,7 +129,7 @@ llm_call_duration_seconds = Histogram(
 # ========== GAUGES (ESTADO ACTUAL) ==========
 
 cache_entries = Gauge(
-    'agent_citas_cache_entries',
+    'citas_cache_entries',
     'Número de entradas en cache',
     ['cache_type']
 )
@@ -137,7 +137,7 @@ cache_entries = Gauge(
 # ========== INFO ==========
 
 agent_info = Info(
-    'agent_citas_info',
+    'citas_info',
     'Información del agente de citas'
 )
 
