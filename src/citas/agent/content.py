@@ -21,8 +21,10 @@ class CitaStructuredResponse(BaseModel):
     url: str | None = Field(
         default=None,
         description=(
-            "Solo para el archivo de saludo en el primer mensaje de la conversación. "
-            "En el resto de respuestas debe ser null. "
+            "Archivo adjunto opcional. Usos válidos: "
+            "(1) archivo de saludo en el primer mensaje (si no aplica un archivo de ayuda); "
+            "(2) archivo de ayuda de una pregunta frecuente, solo la primera vez que se responde esa FAQ en la conversación. "
+            "Si ya enviaste ese archivo antes en el historial, url debe ser null. "
             "No usar para enlaces Meet (esos van en reply)."
         ),
     )
