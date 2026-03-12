@@ -11,25 +11,25 @@ from contextlib import contextmanager
 
 # Conversaciones
 chat_requests_total = Counter(
-    'agent_citas_chat_requests_total',
+    'citas_chat_requests_total',
     'Total de mensajes recibidos por el agente',
     ['empresa_id']
 )
 
 chat_errors_total = Counter(
-    'agent_citas_chat_errors_total',
+    'citas_chat_errors_total',
     'Total de errores en el procesamiento de mensajes',
     ['error_type']
 )
 
 # Citas
 booking_attempts_total = Counter(
-    'agent_citas_booking_attempts_total',
+    'citas_booking_attempts_total',
     'Total de intentos de cita'
 )
 
 booking_success_total = Counter(
-    'agent_citas_booking_success_total',
+    'citas_booking_success_total',
     'Total de citas exitosas'
 )
 

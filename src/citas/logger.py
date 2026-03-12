@@ -64,7 +64,4 @@ def get_logger(name: str) -> logging.Logger:
     return logging.getLogger(name)
 
 
-# Logger por defecto para uso rápido
-logger = get_logger("citas")
-
-__all__ = ["setup_logging", "get_logger", "logger"]
+__all__ = ["setup_logging", "get_logger"]

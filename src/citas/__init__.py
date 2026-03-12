@@ -18,26 +18,3 @@ from importlib.metadata import version as _pkg_version
 
 __version__ = _pkg_version("citas")
 __author__ = "Ariel Amado Frias Rojas"
-
-# Exportar funciones principales
-from .agent import process_cita_message
-from .logger import get_logger, setup_logging
-from .metrics import (
-    track_chat_response,
-    track_tool_execution,
-    record_booking_success,
-    record_booking_failure
-)
-
-__all__ = [
-    # Core
-    "process_cita_message",
-    # Logging
-    "get_logger",
-    "setup_logging",
-    # Metrics
-    "track_chat_response",
-    "track_tool_execution",
-    "record_booking_success",
-    "record_booking_failure",
-]
