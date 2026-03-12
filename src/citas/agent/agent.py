@@ -9,23 +9,18 @@ import openai
 
 from langchain.agents import create_agent
 
-from ._llm import get_model, get_checkpointer
+from .runtime import (
+    get_model, get_checkpointer,
+    get_cached_agent, cache_agent, agent_cache_size, agent_cache_ttl,
+    acquire_agent_lock, release_agent_lock, acquire_session_lock,
+    message_window,
+)
 from ..tools.tools import AGENT_TOOLS
 from ..logger import get_logger
 from ..metrics import track_chat_response, track_llm_call, record_chat_error, chat_requests_total, AGENT_CACHE, update_cache_stats
 from .prompts import build_citas_system_prompt
 from .content import CitaStructuredResponse, _build_content
 from .context import _validate_context, _prepare_agent_context
-from ._cache import (
-    get_cached_agent,
-    cache_agent,
-    agent_cache_size,
-    agent_cache_ttl,
-    acquire_agent_lock,
-    release_agent_lock,
-    acquire_session_lock,
-)
-from .middleware import message_window
 
 logger = get_logger(__name__)
 

@@ -12,8 +12,8 @@ from langchain.chat_models import init_chat_model
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
-from .. import config as app_config
-from ..logger import get_logger
+from ... import config as app_config
+from ...logger import get_logger
 
 logger = get_logger(__name__)
 

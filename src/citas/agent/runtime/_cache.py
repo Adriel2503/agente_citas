@@ -15,8 +15,8 @@ from typing import Any
 
 from cachetools import TTLCache
 
-from .. import config as app_config
-from ..logger import get_logger
+from ... import config as app_config
+from ...logger import get_logger
 
 logger = get_logger(__name__)
 

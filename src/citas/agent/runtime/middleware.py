@@ -9,7 +9,7 @@ Compatible con C1 (Redis migration): el checkpointer no se toca.
 from langchain.agents.middleware import wrap_model_call, ModelRequest, ModelResponse
 from langchain_core.messages import trim_messages
 
-from .. import config as app_config
+from ... import config as app_config
 
 
 @wrap_model_call
