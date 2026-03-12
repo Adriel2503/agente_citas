@@ -27,51 +27,37 @@ class AgentContext:
     session_id: int = 0
 
 
-def _validate_context(context: dict[str, Any]) -> None:
+def _validate_context(config: dict[str, Any]) -> None:
     """
-    Valida que el contexto tenga los parámetros requeridos.
+    Valida que la config tenga los parámetros requeridos.
 
     Args:
-        context: Contexto con configuración del bot
+        config: Config directa del bot (sin wrapper "context")
 
     Raises:
         ValueError: Si faltan parámetros requeridos
     """
-    config_data: dict[str, Any] = context.get("config", {})
+    if "id_empresa" not in config or config["id_empresa"] is None:
+        raise ValueError("Config missing required key: id_empresa")
 
-    if "id_empresa" not in config_data or config_data["id_empresa"] is None:
-        raise ValueError("Context missing required key in config: id_empresa")
-
-    logger.debug("[AGENT] Context validated: id_empresa=%s", config_data["id_empresa"])
+    logger.debug("[AGENT] Config validated: id_empresa=%s", config["id_empresa"])
 
 
-def _prepare_agent_context(context: dict[str, Any], session_id: int) -> AgentContext:
+def _prepare_agent_context(config_data: dict[str, Any], session_id: int) -> AgentContext:
     """
     Prepara el contexto runtime para inyectar a las tools del agente.
 
+    Recibe el dict de config ya aplanado (sin wrapper "context").
     Solo incluye en context_params los campos que el orquestador envió explícitamente
-    y con valor no-None. Los campos ausentes quedan con el default del dataclass
-    AgentContext, evitando pisar valores por accidente.
-
-    Conversiones por campo (heterogéneas, no extraíbles a un helper genérico):
-      - duracion_cita_minutos, slots: copia directa (int → int).
-      - usuario_id: cast explícito a int (el orquestador puede enviarlo como str).
-      - correo_usuario: cast a str + strip (elimina espacios accidentales).
-      - agendar_usuario, agendar_sucursal: bool o int → int (0/1).
-          Solo se acepta bool o int; cualquier otro tipo (ej. str "1") se ignora
-          para evitar conversiones silenciosas con semántica ambigua.
+    y con valor no-None. Los campos ausentes quedan con el default del dataclass.
 
     Args:
-        context: Contexto del orquestador con clave "config" conteniendo los parámetros.
+        config_data: Config del orquestador con id_empresa y parámetros del agente.
         session_id: ID de sesión (int, unificado con orquestador).
-                    Se asigna también a id_prospecto cuando este no viene explícito.
 
     Returns:
         AgentContext configurado con los valores del orquestador o los defaults del dataclass.
     """
-    config_data: dict[str, Any] = context.get("config", {})
-
-    # id_empresa ya está validado, usar directamente
     context_params: dict[str, Any] = {
         "id_empresa": config_data["id_empresa"],
         "session_id": session_id,

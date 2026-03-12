@@ -44,7 +44,7 @@ initialize_agent_info(model=app_config.OPENAI_MODEL, version=__version__)
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=4096)
     session_id: int
-    context: dict[str, Any] | None = None
+    config: dict[str, Any] | None = None
 
 
 class ChatResponse(BaseModel):
@@ -98,24 +98,24 @@ async def chat(req: ChatRequest) -> ChatResponse:
     Body:
         message: Mensaje del cliente que quiere agendar una cita
         session_id: ID de sesión (int, unificado con orquestador)
-        context: Contexto adicional requerido:
-            - config.id_empresa (int, requerido): ID de la empresa
-            - config.usuario_id (int, opcional): ID del usuario/vendedor
-            - config.correo_usuario (str, opcional): Email del usuario/vendedor
-            - config.agendar_usuario (bool o int, opcional): 1=agendar por usuario (default: 1)
-            - config.agendar_sucursal (bool o int, opcional): 1=agendar por sucursal (default: 0)
-            - config.duracion_cita_minutos (int, requerido): Duración de la cita en minutos
-            - config.slots (int, requerido): Capacidad de slots simultáneos
-            - config.personalidad (str, opcional): Personalidad del agente
+        config: Configuración del bot (sin wrapper "context"):
+            - id_empresa (int, requerido): ID de la empresa
+            - usuario_id (int, opcional): ID del usuario/vendedor
+            - correo_usuario (str, opcional): Email del usuario/vendedor
+            - agendar_usuario (bool o int, opcional): 1=agendar por usuario (default: 1)
+            - agendar_sucursal (bool o int, opcional): 1=agendar por sucursal (default: 0)
+            - duracion_cita_minutos (int, requerido): Duración de la cita en minutos
+            - slots (int, requerido): Capacidad de slots simultáneos
+            - personalidad (str, opcional): Personalidad del agente
 
     Returns:
         JSON con campo reply: respuesta del agente
     """
-    context = req.context or {}
+    config = req.config or {}
 
     logger.info("[HTTP] Mensaje recibido - Session: %s, Length: %s chars", req.session_id, len(req.message))
     logger.debug("[HTTP] Message: %s...", req.message[:100])
-    logger.debug("[HTTP] Context keys: %s", list(context.keys()))
+    logger.debug("[HTTP] Config keys: %s", list(config.keys()))
 
     _start = time.perf_counter()
     _http_status = "success"
@@ -125,7 +125,7 @@ async def chat(req: ChatRequest) -> ChatResponse:
             process_cita_message(
                 message=req.message,
                 session_id=req.session_id,
-                context=context
+                config=config
             ),
             timeout=app_config.CHAT_TIMEOUT,
         )

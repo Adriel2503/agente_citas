@@ -107,7 +107,7 @@ async def _get_agent(config: dict[str, Any]):
 async def process_cita_message(
     message: str,
     session_id: int,
-    context: dict[str, Any],
+    config: dict[str, Any],
 ) -> tuple[str, str | None]:
     """
     Procesa un mensaje del cliente sobre citas/reuniones usando LangChain 1.2+ Agent.
@@ -121,7 +121,7 @@ async def process_cita_message(
     Args:
         message: Mensaje del cliente
         session_id: ID de sesión (int, unificado con orquestador)
-        context: Contexto adicional (config del bot, id_empresa, etc.)
+        config: Config directa del bot (id_empresa, personalidad, etc.)
 
     Returns:
         Tupla (reply, url). url es None cuando no hay medio que adjuntar.
@@ -146,22 +146,22 @@ async def process_cita_message(
         raise ValueError("session_id es requerido (entero no negativo)")
 
     # Registrar request con label de baja cardinalidad (por empresa, no por sesión)
-    _empresa_id = str((context.get("config") or {}).get("id_empresa", "unknown"))
+    _empresa_id = str(config.get("id_empresa", "unknown"))
     chat_requests_total.labels(empresa_id=_empresa_id).inc()
 
     # Serializar requests concurrentes del mismo usuario para evitar condiciones
     # de carrera sobre el mismo thread_id del checkpointer (InMemorySaver).
     lock = acquire_session_lock(session_id)
     async with lock:
-        # Validar contexto
+        # Validar config
         try:
-            _validate_context(context)
+            _validate_context(config)
         except ValueError as e:
-            logger.error("[AGENT] Error de contexto: %s", e)
+            logger.error("[AGENT] Error de config: %s", e)
             record_chat_error("context_error")
             return (f"Error de configuración: {str(e)}", None)
 
-        config_data = dict(context.get("config") or {})
+        config_data = dict(config)
         config_data.setdefault("personalidad", "amable, profesional y eficiente")
 
         try:
@@ -171,10 +171,10 @@ async def process_cita_message(
             record_chat_error("agent_creation_error")
             return ("Disculpa, tuve un problema de configuración. ¿Podrías intentar nuevamente?", None)
 
-        agent_context = _prepare_agent_context(context, session_id)
+        agent_context = _prepare_agent_context(config_data, session_id)
 
         # LangGraph checkpointer usa thread_id como str
-        config = {
+        run_config = {
             "configurable": {
                 "thread_id": str(session_id)
             }
@@ -190,7 +190,7 @@ async def process_cita_message(
                                 {"role": "user", "content": _build_content(message)}
                             ]
                         },
-                        config=config,
+                        config=run_config,
                         context=agent_context
                     )
 
