@@ -60,7 +60,10 @@ async def init_checkpointer() -> None:
             JsonPlusRedisSerializer,
         )
 
-        saver = AsyncRedisSaver(redis_url=app_config.REDIS_URL)
+        ttl_hours = app_config.REDIS_CHECKPOINT_TTL_HOURS
+        ttl_config = {"default_ttl": ttl_hours * 60} if ttl_hours > 0 else None
+
+        saver = AsyncRedisSaver(redis_url=app_config.REDIS_URL, ttl=ttl_config)
         saver.serde = JsonPlusRedisSerializer(
             allowed_json_modules=[
                 ("citas", "agent", "content", "CitaStructuredResponse")
@@ -71,7 +74,11 @@ async def init_checkpointer() -> None:
         )
         await saver.asetup()
         _checkpointer = saver
-        logger.info("[LLM] Checkpointer: AsyncRedisSaver (%s)", app_config.REDIS_URL)
+        _ttl_label = f"TTL={ttl_hours}h" if ttl_hours > 0 else "sin TTL"
+        logger.info(
+            "[LLM] Checkpointer: AsyncRedisSaver (%s, %s)",
+            app_config.REDIS_URL, _ttl_label,
+        )
 
     except ImportError:
         logger.warning(

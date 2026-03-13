@@ -96,11 +96,14 @@ SERVER_HOST: str = _get_str("SERVER_HOST", "0.0.0.0")
 SERVER_PORT: int = _get_int("SERVER_PORT", 8002, min_val=1, max_val=65535)
 
 # ---------------------------------------------------------------------------
-# Base de datos y Redis (futuro)
+# Base de datos y Redis
 # ---------------------------------------------------------------------------
 
 DATABASE_URL: str = _get_str("DATABASE_URL", "")
 REDIS_URL: str = _get_str("REDIS_URL", "")
+REDIS_CHECKPOINT_TTL_HOURS: int = _get_int(
+    "REDIS_CHECKPOINT_TTL_HOURS", 24, min_val=0, max_val=8760
+)  # 0 = sin TTL, max 1 año
 
 # ---------------------------------------------------------------------------
 # Logging
