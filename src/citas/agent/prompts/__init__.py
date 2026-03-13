@@ -38,19 +38,22 @@ def _now_peru() -> datetime:
 
 
 async def build_citas_system_prompt(
-    config: CitasConfig,
+    id_empresa: int,
+    config: CitasConfig | None,
 ) -> str:
     """
     Construye el system prompt del agente de citas.
 
     Args:
-        config: CitasConfig validado por Pydantic.
+        id_empresa: ID de la empresa (tenant key).
+        config: CitasConfig opcional validado por Pydantic.
 
     Returns:
         System prompt renderizado.
     """
-    variables = config.model_dump(exclude_none=True)
-    variables["archivo_saludo"] = (config.archivo_saludo or "").strip()
+    variables = config.model_dump(exclude_none=True) if config else {}
+    variables["id_empresa"] = id_empresa
+    variables["archivo_saludo"] = (config.archivo_saludo if config else None or "").strip()
 
     # Fecha y hora actual en Perú (para que el agente sepa "hoy" y "mañana")
     now = _now_peru()
@@ -68,10 +71,10 @@ async def build_citas_system_prompt(
 
     # Cargar horario, productos/servicios, contexto de negocio y preguntas frecuentes en paralelo
     results = await asyncio.gather(
-        fetch_horario_reuniones(config.id_empresa),
-        fetch_nombres_productos_servicios(config.id_empresa),
-        fetch_contexto_negocio(config.id_empresa),
-        fetch_preguntas_frecuentes(config.id_chatbot),
+        fetch_horario_reuniones(id_empresa),
+        fetch_nombres_productos_servicios(id_empresa),
+        fetch_contexto_negocio(id_empresa),
+        fetch_preguntas_frecuentes(config.id_chatbot if config else None),
         return_exceptions=True,
     )
 

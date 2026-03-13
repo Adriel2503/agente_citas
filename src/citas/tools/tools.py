@@ -185,7 +185,7 @@ async def create_booking(
         slots = ctx.slots
         agendar_usuario = ctx.agendar_usuario
         agendar_sucursal = ctx.agendar_sucursal
-        id_prospecto = ctx.id_prospecto
+        session_id = ctx.session_id
         usuario_id = ctx.usuario_id
         correo_usuario = ctx.correo_usuario
 
@@ -236,7 +236,7 @@ async def create_booking(
             logger.debug("[TOOL] create_booking - Creando evento en API")
             booking_result = await confirm_booking(
                 usuario_id=usuario_id,
-                id_prospecto=id_prospecto,
+                session_id=session_id,
                 nombre_completo=bd.customer_name,
                 correo_cliente=bd.customer_contact,
                 fecha=date,

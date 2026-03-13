@@ -33,7 +33,7 @@ _OPENAI_ERRORS: dict[type, tuple[str, str, str, str]] = {
 }
 
 
-async def _get_agent(config: CitasConfig):
+async def _get_agent(id_empresa: int, config: CitasConfig | None):
     """
     Devuelve el agente compilado para id_empresa.
 
@@ -47,12 +47,13 @@ async def _get_agent(config: CitasConfig):
     concurrentemente (thundering herd).
 
     Args:
-        config: CitasConfig con configuración del agente (id_empresa requerido; personalidad, nombre, etc. opcionales).
+        id_empresa: ID de la empresa (tenant key).
+        config: CitasConfig opcional con configuración del agente (personalidad, nombre, etc.).
 
     Returns:
         Agente configurado con tools y checkpointer
     """
-    cache_key: tuple = (config.id_empresa,)
+    cache_key: tuple = (id_empresa,)
 
     # Fast path: cache hit (sin await, atómico en asyncio single-thread)
     cached = get_cached_agent(cache_key)
@@ -78,7 +79,7 @@ async def _get_agent(config: CitasConfig):
             logger.debug("[AGENT] Creando agente con LangChain 1.2+ API - id_empresa=%s", cache_key[0])
 
             # Construir system prompt usando template Jinja2 (async: carga horario y productos en paralelo)
-            system_prompt = await build_citas_system_prompt(config=config)
+            system_prompt = await build_citas_system_prompt(id_empresa=id_empresa, config=config)
 
             # Crear agente con API moderna (response_format: reply + url opcional)
             agent = create_agent(
@@ -106,7 +107,8 @@ async def _get_agent(config: CitasConfig):
 async def process_cita_message(
     message: str,
     session_id: int,
-    config: CitasConfig,
+    id_empresa: int,
+    config: CitasConfig | None,
 ) -> tuple[str, str | None]:
     """
     Procesa un mensaje del cliente sobre citas/reuniones usando LangChain 1.2+ Agent.
@@ -120,7 +122,8 @@ async def process_cita_message(
     Args:
         message: Mensaje del cliente
         session_id: ID de sesión (int, unificado con orquestador)
-        config: Config directa del bot (id_empresa, personalidad, etc.)
+        id_empresa: ID de la empresa (tenant key)
+        config: Config opcional del bot (personalidad, slots, etc.)
 
     Returns:
         Tupla (reply, url). url es None cuando no hay medio que adjuntar.
@@ -145,7 +148,7 @@ async def process_cita_message(
         raise ValueError("session_id es requerido (entero no negativo)")
 
     # Registrar request con label de baja cardinalidad (por empresa, no por sesión)
-    _empresa_id = str(config.id_empresa)
+    _empresa_id = str(id_empresa)
     chat_requests_total.labels(empresa_id=_empresa_id).inc()
 
     # Serializar requests concurrentes del mismo usuario para evitar condiciones
@@ -153,13 +156,13 @@ async def process_cita_message(
     lock = acquire_session_lock(session_id)
     async with lock:
         try:
-            agent = await _get_agent(config)
+            agent = await _get_agent(id_empresa, config)
         except Exception as e:
             logger.error("[AGENT] Error creando agent: %s", e, exc_info=True)
             record_chat_error("agent_creation_error")
             return ("Disculpa, tuve un problema de configuración. ¿Podrías intentar nuevamente?", None)
 
-        agent_context = _prepare_agent_context(config, session_id)
+        agent_context = _prepare_agent_context(id_empresa, config, session_id)
 
         # LangGraph checkpointer usa thread_id como str
         run_config = {

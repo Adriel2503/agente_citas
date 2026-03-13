@@ -82,8 +82,8 @@ async def chat(req: ChatRequest) -> ChatResponse:
     Body:
         message: Mensaje del cliente que quiere agendar una cita
         session_id: ID de sesión (int, unificado con orquestador)
-        config: Configuración del bot (sin wrapper "context"):
-            - id_empresa (int, requerido): ID de la empresa
+        id_empresa: ID de la empresa (int, requerido)
+        config: Configuración opcional del bot:
             - usuario_id (int, opcional): ID del usuario/vendedor
             - correo_usuario (str, opcional): Email del usuario/vendedor
             - agendar_usuario (bool o int, opcional): 1=agendar por usuario (default: 1)
@@ -96,15 +96,10 @@ async def chat(req: ChatRequest) -> ChatResponse:
         JSON con campo reply: respuesta del agente
     """
     config = req.config
-    if config is None:
-        return ChatResponse(
-            reply="Error de configuración: config es requerido con al menos id_empresa.",
-            url=None,
-        )
 
-    logger.info("[HTTP] Mensaje recibido - Session: %s, Length: %s chars", req.session_id, len(req.message))
+    logger.info("[HTTP] Mensaje recibido - Session: %s, Empresa: %s, Length: %s chars", req.session_id, req.id_empresa, len(req.message))
     logger.debug("[HTTP] Message: %s...", req.message[:100])
-    logger.debug("[HTTP] Config fields: %s", config.model_fields_set)
+    logger.debug("[HTTP] Config fields: %s", config.model_fields_set if config else "None")
 
     _start = time.perf_counter()
     _http_status = "success"
@@ -114,7 +109,8 @@ async def chat(req: ChatRequest) -> ChatResponse:
             process_cita_message(
                 message=req.message,
                 session_id=req.session_id,
-                config=config
+                id_empresa=req.id_empresa,
+                config=config,
             ),
             timeout=app_config.CHAT_TIMEOUT,
         )

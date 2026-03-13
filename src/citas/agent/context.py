@@ -2,7 +2,7 @@
 Modelo de contexto runtime y función de preparación.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields as dc_fields
 from typing import Any
 
 from ..logger import get_logger
@@ -24,11 +24,10 @@ class AgentContext:
     usuario_id: int | None = None  # None = no enviado por el orquestador (requerido para CREAR_EVENTO)
     correo_usuario: str | None = None  # None = no enviado por el orquestador (requerido para CREAR_EVENTO)
     agendar_sucursal: int = 0
-    id_prospecto: int = 0  # mismo que session_id del orquestador
     session_id: int = 0
 
 
-def _prepare_agent_context(config: CitasConfig, session_id: int) -> AgentContext:
+def _prepare_agent_context(id_empresa: int, config: CitasConfig | None, session_id: int) -> AgentContext:
     """
     Prepara el contexto runtime para inyectar a las tools del agente.
 
@@ -36,30 +35,22 @@ def _prepare_agent_context(config: CitasConfig, session_id: int) -> AgentContext
     Solo se incluyen campos con valor no-None; el resto queda con el default del dataclass.
 
     Args:
-        config: CitasConfig validado por Pydantic.
+        id_empresa: ID de la empresa (tenant key).
+        config: CitasConfig opcional validado por Pydantic.
         session_id: ID de sesión (int, unificado con orquestador).
 
     Returns:
         AgentContext configurado.
     """
     params: dict[str, Any] = {
-        "id_empresa": config.id_empresa,
+        "id_empresa": id_empresa,
         "session_id": session_id,
-        "id_prospecto": session_id,
-        "agendar_usuario": config.agendar_usuario,
-        "agendar_sucursal": config.agendar_sucursal,
     }
 
-    if config.duracion_cita_minutos is not None:
-        params["duracion_cita_minutos"] = config.duracion_cita_minutos
-
-    if config.slots is not None:
-        params["slots"] = config.slots
-
-    if config.usuario_id is not None:
-        params["usuario_id"] = config.usuario_id
-
-    if config.correo_usuario is not None:
-        params["correo_usuario"] = config.correo_usuario
+    if config:
+        agent_fields = {f.name for f in dc_fields(AgentContext)}
+        for k, v in config.model_dump(exclude_none=True).items():
+            if k in agent_fields:
+                params[k] = v
 
     return AgentContext(**params)

@@ -10,7 +10,6 @@ class CitasConfig(BaseModel):
     """Configuración específica del agente de citas."""
 
     # --- Campos para tools (AgentContext) ---
-    id_empresa: int
     duracion_cita_minutos: int | None = None
     slots: int | None = None
     agendar_usuario: int = 1
@@ -77,6 +76,7 @@ class ChatRequest(BaseModel):
 
     message: str = Field(..., min_length=1, max_length=4096)
     session_id: int
+    id_empresa: int
     # --- agregar campos universales aquí ---
     config: CitasConfig | None = None
 
