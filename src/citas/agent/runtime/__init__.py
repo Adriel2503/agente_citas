@@ -1,6 +1,6 @@
 """Runtime del agente: cache, LLM y middleware. No personalizar entre agentes."""
 
-from ._llm import get_model, get_checkpointer, close_checkpointer
+from ._llm import get_model, get_checkpointer, close_checkpointer, init_checkpointer
 from ._cache import (
     get_cached_agent,
     cache_agent,
@@ -16,6 +16,7 @@ __all__ = [
     "get_model",
     "get_checkpointer",
     "close_checkpointer",
+    "init_checkpointer",
     "get_cached_agent",
     "cache_agent",
     "agent_cache_size",

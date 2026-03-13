@@ -2,11 +2,12 @@
 Singleton LLM y checkpointer LangGraph para el agente de citas.
 
 Inicialización lazy del modelo (get_model) igual que get_client en http_client.py.
-El checkpointer se crea al importar el módulo (síncrono, seguro en asyncio).
-
-C1: close_checkpointer() es actualmente un no-op; en C1 se reemplazará por
-    la lógica de init/close de AsyncRedisSaver (ver PENDIENTES.md C1).
+El checkpointer se crea en init_checkpointer() (async, llamado desde lifespan).
 """
+
+from __future__ import annotations
+
+from typing import Any
 
 from langchain.chat_models import init_chat_model
 from langgraph.checkpoint.memory import InMemorySaver
@@ -17,18 +18,72 @@ from ...logger import get_logger
 
 logger = get_logger(__name__)
 
-# Checkpointer LangGraph: creado una sola vez al importar.
-# JsonPlusSerializer usa string tuples — NO importa CitaStructuredResponse,
-# por lo que infra/ → agent/ no existe como dependencia.
-_checkpointer = InMemorySaver(
-    serde=JsonPlusSerializer(
-        allowed_msgpack_modules=[("citas.agent.content", "CitaStructuredResponse")]
-    )
-)
+# ---------------------------------------------------------------------------
+# Checkpointer LangGraph (singleton, inicializado en init_checkpointer)
+# ---------------------------------------------------------------------------
+
+_checkpointer: Any = None
 
 # Modelo LLM: singleton compartido por todas las empresas.
-# init_chat_model es síncrono; no hay riesgo de race condition en asyncio single-thread.
 _model = None
+
+
+def _make_memory_saver() -> InMemorySaver:
+    """Crea InMemorySaver con allowlist para CitaStructuredResponse (path msgpack)."""
+    return InMemorySaver(
+        serde=JsonPlusSerializer(
+            allowed_msgpack_modules=[("citas.agent.content", "CitaStructuredResponse")]
+        )
+    )
+
+
+async def init_checkpointer() -> None:
+    """
+    Inicializa el checkpointer LangGraph.
+
+    Si REDIS_URL está configurado, intenta AsyncRedisSaver con serialización
+    JSON (JsonPlusRedisSerializer). Si Redis no está disponible o el paquete
+    no está instalado, cae a InMemorySaver como fallback.
+
+    Debe llamarse una sola vez al arrancar la app (FastAPI lifespan).
+    """
+    global _checkpointer
+
+    if not app_config.REDIS_URL:
+        _checkpointer = _make_memory_saver()
+        logger.info("[LLM] Checkpointer: InMemorySaver (REDIS_URL vacío)")
+        return
+
+    try:
+        from langgraph.checkpoint.redis.aio import AsyncRedisSaver
+        from langgraph.checkpoint.redis.jsonplus_redis import (
+            JsonPlusRedisSerializer,
+        )
+
+        saver = AsyncRedisSaver(redis_url=app_config.REDIS_URL)
+        saver.serde = JsonPlusRedisSerializer(
+            allowed_json_modules=[
+                ("citas", "agent", "content", "CitaStructuredResponse")
+            ],
+            allowed_msgpack_modules=[
+                ("citas.agent.content", "CitaStructuredResponse")
+            ],
+        )
+        await saver.asetup()
+        _checkpointer = saver
+        logger.info("[LLM] Checkpointer: AsyncRedisSaver (%s)", app_config.REDIS_URL)
+
+    except ImportError:
+        logger.warning(
+            "[LLM] langgraph-checkpoint-redis no instalado — usando InMemorySaver"
+        )
+        _checkpointer = _make_memory_saver()
+
+    except Exception as e:
+        logger.warning(
+            "[LLM] No se pudo conectar a Redis (%s) — usando InMemorySaver", e
+        )
+        _checkpointer = _make_memory_saver()
 
 
 def get_model():
@@ -51,17 +106,33 @@ def get_model():
 
 
 def get_checkpointer():
-    """Retorna el checkpointer LangGraph singleton (InMemorySaver)."""
+    """Retorna el checkpointer LangGraph singleton (InMemorySaver o AsyncRedisSaver)."""
+    if _checkpointer is None:
+        raise RuntimeError(
+            "Checkpointer no inicializado. Llamar await init_checkpointer() primero."
+        )
     return _checkpointer
 
 
 async def close_checkpointer() -> None:
     """
     Cierra el checkpointer al apagar la app.
-    Actualmente no-op (InMemorySaver no requiere cierre).
-    En C1: reemplazar por la lógica AsyncRedisSaver de PENDIENTES.md.
-    Llamar desde main.py lifespan al implementar C1.
+    Si es AsyncRedisSaver, cierra la conexión Redis via __aexit__.
+    No-op si es InMemorySaver.
     """
+    global _checkpointer
+
+    if _checkpointer is None:
+        return
+
+    if hasattr(_checkpointer, "__aexit__"):
+        try:
+            await _checkpointer.__aexit__(None, None, None)
+            logger.info("[LLM] AsyncRedisSaver cerrado correctamente")
+        except Exception as e:
+            logger.warning("[LLM] Error cerrando Redis checkpointer: %s", e)
+
+    _checkpointer = None
 
 
-__all__ = ["get_model", "get_checkpointer", "close_checkpointer"]
+__all__ = ["get_model", "get_checkpointer", "close_checkpointer", "init_checkpointer"]

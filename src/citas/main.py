@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse
 from prometheus_client import make_asgi_app
 
 from . import config as app_config, __version__
-from .agent import process_cita_message
+from .agent import process_cita_message, init_checkpointer, close_checkpointer
 from .logger import setup_logging, get_logger
 from .metrics import initialize_agent_info, HTTP_REQUESTS, HTTP_DURATION
 from .infra import close_http_client
@@ -42,9 +42,11 @@ initialize_agent_info(model=app_config.OPENAI_MODEL, version=__version__)
 
 @asynccontextmanager
 async def app_lifespan(app: FastAPI):
+    await init_checkpointer()
     try:
         yield
     finally:
+        await close_checkpointer()
         await close_http_client()
 
 
