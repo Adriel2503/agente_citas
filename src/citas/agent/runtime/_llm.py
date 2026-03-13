@@ -22,7 +22,7 @@ logger = get_logger(__name__)
 # por lo que infra/ → agent/ no existe como dependencia.
 _checkpointer = InMemorySaver(
     serde=JsonPlusSerializer(
-        allowed_json_modules=[("citas", "agent", "content", "CitaStructuredResponse")]
+        allowed_msgpack_modules=[("citas.agent.content", "CitaStructuredResponse")]
     )
 )
 
