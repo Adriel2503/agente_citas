@@ -5,6 +5,7 @@ Configura logging consistente en toda la aplicación.
 
 import logging
 import sys
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 
@@ -26,11 +27,18 @@ def setup_logging(
     
     handlers = [logging.StreamHandler(sys.stdout)]
     
-    # Agregar file handler si se especifica
+    # File handler con rotación automática (solo si LOG_FILE está configurado).
+    # Sin LOG_FILE, los logs van únicamente a stdout (ideal para Docker/Easypanel).
+    # Rotación: cada archivo hasta 10 MB, se mantienen 5 backups (~60 MB máx en disco).
     if log_file:
         log_path = Path(log_file)
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        handlers.append(logging.FileHandler(log_file, encoding='utf-8'))
+        handlers.append(RotatingFileHandler(
+            log_file,
+            maxBytes=10_485_760,  # 10 MB por archivo
+            backupCount=5,        # app.log, app.log.1, ..., app.log.5
+            encoding='utf-8',
+        ))
     
     # Configurar logging root
     logging.basicConfig(

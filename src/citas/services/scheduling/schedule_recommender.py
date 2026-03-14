@@ -18,7 +18,7 @@ from ... import config as app_config
 from ...infra import post_with_logging, resilient_call, CircuitBreaker
 from ...config import agendar_reunion_cb as _default_agendar_cb
 from .availability_client import check_slot_availability
-from .time_parser import DIAS_ESPANOL
+from .time_parser import DIAS_NOMBRE
 
 logger = get_logger(__name__)
 
@@ -59,7 +59,7 @@ class ScheduleRecommender:
         elif fecha_inicio:
             try:
                 fecha_obj = datetime.strptime(fecha_inicio, "%Y-%m-%d %H:%M:%S")
-                dia_nombre = DIAS_ESPANOL.get(fecha_obj.strftime("%A"), fecha_obj.strftime("%A"))
+                dia_nombre = DIAS_NOMBRE[fecha_obj.weekday()].capitalize()
                 texto = f"{dia_nombre} {fecha_obj.strftime('%d/%m')} a las {hora_legible}"
             except ValueError:
                 texto = f"{dia} a las {hora_legible}"

@@ -13,13 +13,13 @@ from ... import config as app_config
 from ...logger import get_logger
 from ...schemas import CitasConfig
 from ...services.prompt_data import fetch_contexto_negocio, fetch_horario_reuniones, fetch_nombres_productos_servicios, format_nombres_para_prompt, fetch_preguntas_frecuentes
+from ...services.scheduling.time_parser import DIAS_NOMBRE
 
 logger = get_logger(__name__)
 
 _TEMPLATES_DIR = Path(__file__).resolve().parent
 _ZONA_PERU = ZoneInfo(app_config.TIMEZONE)
 
-_DIAS_ESPANOL = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
 _MESES_ESPANOL = [
     "enero", "febrero", "marzo", "abril", "mayo", "junio",
     "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
@@ -59,7 +59,7 @@ async def build_citas_system_prompt(
     now = _now_peru()
     variables["fecha_iso"] = now.strftime("%Y-%m-%d")
     variables["hora_actual"] = now.strftime("%I:%M %p")
-    dia_nombre = _DIAS_ESPANOL[now.weekday()]
+    dia_nombre = DIAS_NOMBRE[now.weekday()]
     mes_nombre = _MESES_ESPANOL[now.month - 1]
     variables["fecha_completa"] = f"{now.day} de {mes_nombre} de {now.year} es {dia_nombre}"
     logger.info(
