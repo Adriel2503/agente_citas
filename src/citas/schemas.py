@@ -5,6 +5,10 @@ Define el contrato HTTP (request/response) y la configuración tipada.
 
 from pydantic import BaseModel, Field, field_validator
 
+from .logger import get_logger
+
+logger = get_logger(__name__)
+
 
 class CitasConfig(BaseModel):
     """Configuración específica del agente de citas."""
@@ -38,10 +42,12 @@ class CitasConfig(BaseModel):
     @classmethod
     def coerce_usuario_id(cls, v: object) -> int | None:
         if v is None:
+            logger.warning("[SCHEMA] usuario_id es None (no enviado o null)")
             return None
         try:
             return int(v)
         except (ValueError, TypeError):
+            logger.warning("[SCHEMA] usuario_id no es entero, recibido: %r", v)
             return None
 
     @field_validator("personalidad", mode="before")

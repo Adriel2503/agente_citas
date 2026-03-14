@@ -12,6 +12,7 @@ Resiliencia:
 """
 
 import asyncio
+import html
 import json
 import re
 from typing import Any
@@ -55,7 +56,7 @@ def _clean_description(desc: str | None, max_chars: int = 120) -> str:
         return "-"
     text = str(desc).strip()
     text = re.sub(r"<[^>]+>", " ", text)
-    text = text.replace("&nbsp;", " ").replace("&amp;", "&")
+    text = html.unescape(text)
     text = re.sub(r"\s+", " ", text).strip()
     return (text[:max_chars] + "...") if len(text) > max_chars else text
 

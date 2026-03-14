@@ -90,19 +90,27 @@ async def confirm_booking(
         if log_create_booking_apis:
             logger.info("[create_booking] API 3: ws_calendario.php - CREAR_EVENTO")
             logger.info("  URL: %s", app_config.API_CALENDAR_URL)
-            logger.info("  Enviado: %s", json.dumps(payload, ensure_ascii=False))
+            logger.info("  Enviado: codOpe=%s, usuario_id=%s, fecha=%s→%s", payload["codOpe"], usuario_id, fecha_inicio, fecha_fin)
         logger.debug("[BOOKING] Creando evento: %s %s - %s", fecha, hora, nombre_completo)
         logger.debug("[BOOKING] Payload: %s", payload)
-        logger.debug("[BOOKING] JSON enviado a ws_calendario.php (CREAR_EVENTO): %s", json.dumps(payload, ensure_ascii=False, indent=2))
 
         with track_api_call("crear_evento"):
             client = get_client()
             response = await client.post(app_config.API_CALENDAR_URL, json=payload)
             response.raise_for_status()
-            data = response.json()
+            try:
+                data = response.json()
+            except (json.JSONDecodeError, ValueError):
+                logger.error("[BOOKING] Respuesta no-JSON de ws_calendario: %s", response.text[:200])
+                record_booking_failure("invalid_response")
+                return {
+                    "success": False,
+                    "message": "El servidor respondió con formato inválido",
+                    "error": "invalid_json",
+                }
 
         if log_create_booking_apis:
-            logger.info("  Respuesta: %s", json.dumps(data, ensure_ascii=False))
+            logger.info("  Respuesta: success=%s, message=%s", data.get("success"), data.get("message"))
         logger.debug("[BOOKING] Respuesta API: %s", data)
 
         if data.get("success"):

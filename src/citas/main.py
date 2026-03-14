@@ -8,6 +8,7 @@ Versión mejorada con logging, métricas y observabilidad.
 import asyncio
 import logging
 import time
+import uuid
 from contextlib import asynccontextmanager
 
 import uvicorn
@@ -17,7 +18,7 @@ from prometheus_client import make_asgi_app
 
 from . import config as app_config, __version__
 from .agent import process_cita_message, init_checkpointer, close_checkpointer
-from .logger import setup_logging, get_logger
+from .logger import setup_logging, get_logger, trace_id
 from .metrics import initialize_agent_info, HTTP_REQUESTS, HTTP_DURATION
 from .infra import close_http_client
 from .config import get_health_issues
@@ -97,6 +98,7 @@ async def chat(req: ChatRequest) -> ChatResponse:
     Returns:
         JSON con campo reply: respuesta del agente
     """
+    trace_id.set(uuid.uuid4().hex[:8])
     config = req.config
 
     logger.info("[HTTP] Mensaje recibido - Session: %s, Empresa: %s, Length: %s chars", req.session_id, req.id_empresa, len(req.message))

@@ -140,6 +140,11 @@ HTTP_MAX_CONNECTIONS: int = _get_int("HTTP_MAX_CONNECTIONS", 50, min_val=10, max
 HTTP_MAX_KEEPALIVE: int = _get_int("HTTP_MAX_KEEPALIVE", 20, min_val=5, max_val=200)
 
 # ---------------------------------------------------------------------------
+# Concurrencia del agente (backpressure)
+# ---------------------------------------------------------------------------
+MAX_CONCURRENT_AGENT: int = _get_int("MAX_CONCURRENT_AGENT", 50, min_val=5, max_val=500)
+
+# ---------------------------------------------------------------------------
 # Cache
 # ---------------------------------------------------------------------------
 

@@ -80,12 +80,6 @@ async def init_checkpointer() -> None:
             app_config.REDIS_URL, _ttl_label,
         )
 
-    except ImportError:
-        logger.warning(
-            "[LLM] langgraph-checkpoint-redis no instalado — usando InMemorySaver"
-        )
-        _checkpointer = _make_memory_saver()
-
     except Exception as e:
         logger.warning(
             "[LLM] No se pudo conectar a Redis (%s) — usando InMemorySaver", e

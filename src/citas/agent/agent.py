@@ -3,6 +3,8 @@ Lógica del agente especializado en citas usando LangChain 1.2+ API moderna.
 Versión mejorada con logging, métricas, configuración centralizada y memoria automática.
 """
 
+import asyncio
+
 import openai
 
 from langchain.agents import create_agent
@@ -20,8 +22,12 @@ from .prompts import build_citas_system_prompt
 from .content import CitaStructuredResponse, _build_content
 from .context import _prepare_agent_context
 from ..schemas import CitasConfig
+from .. import config as app_config
 
 logger = get_logger(__name__)
+
+# Backpressure: limita invocaciones concurrentes al agente (OpenAI + tools)
+_semaphore = asyncio.Semaphore(app_config.MAX_CONCURRENT_AGENT)
 
 # Mapeo de errores OpenAI: tipo → (log_level, metric_key, log_tag, mensaje_usuario)
 _OPENAI_ERRORS: dict[type, tuple[str, str, str, str]] = {
@@ -151,74 +157,76 @@ async def process_cita_message(
     _empresa_id = str(id_empresa)
     chat_requests_total.labels(empresa_id=_empresa_id).inc()
 
-    # Serializar requests concurrentes del mismo usuario para evitar condiciones
-    # de carrera sobre el mismo thread_id del checkpointer (InMemorySaver).
-    lock = acquire_session_lock(session_id)
-    async with lock:
-        try:
-            agent = await _get_agent(id_empresa, config)
-        except Exception as e:
-            logger.error("[AGENT] Error creando agent: %s", e, exc_info=True)
-            record_chat_error("agent_creation_error")
-            return ("Disculpa, tuve un problema de configuración. ¿Podrías intentar nuevamente?", None)
+    # Backpressure: limitar invocaciones concurrentes al agente (OpenAI + tools)
+    async with _semaphore:
+        # Serializar requests concurrentes del mismo usuario para evitar condiciones
+        # de carrera sobre el mismo thread_id del checkpointer (InMemorySaver).
+        lock = acquire_session_lock(session_id)
+        async with lock:
+            try:
+                agent = await _get_agent(id_empresa, config)
+            except Exception as e:
+                logger.error("[AGENT] Error creando agent: %s", e, exc_info=True)
+                record_chat_error("agent_creation_error")
+                return ("Disculpa, tuve un problema de configuración. ¿Podrías intentar nuevamente?", None)
 
-        agent_context = _prepare_agent_context(id_empresa, config, session_id)
+            agent_context = _prepare_agent_context(id_empresa, config, session_id)
 
-        # LangGraph checkpointer usa thread_id como str
-        run_config = {
-            "configurable": {
-                "thread_id": str(session_id)
+            # LangGraph checkpointer usa thread_id como str
+            run_config = {
+                "configurable": {
+                    "thread_id": str(session_id)
+                }
             }
-        }
-        try:
-            logger.debug("[AGENT] Invocando agent - Session: %s, Message: %s...", session_id, message[:100])
+            try:
+                logger.debug("[AGENT] Invocando agent - Session: %s, Message: %s...", session_id, message[:100])
 
-            with track_chat_response():
-                with track_llm_call():
-                    result = await agent.ainvoke(
-                        {
-                            "messages": [
-                                {"role": "user", "content": _build_content(message)}
-                            ]
-                        },
-                        config=run_config,
-                        context=agent_context
-                    )
+                with track_chat_response():
+                    with track_llm_call():
+                        result = await agent.ainvoke(
+                            {
+                                "messages": [
+                                    {"role": "user", "content": _build_content(message)}
+                                ]
+                            },
+                            config=run_config,
+                            context=agent_context
+                        )
 
-            structured = result.get("structured_response")
-            if isinstance(structured, CitaStructuredResponse):
-                if structured.reply is None:
-                    logger.warning("[AGENT] structured.reply es None - Session: %s", session_id)
-                    reply = "No recibí respuesta del asistente, por favor intenta nuevamente."
-                elif structured.reply == "":
-                    logger.warning("[AGENT] structured.reply es string vacío - Session: %s", session_id)
-                    reply = "El asistente envió una respuesta vacía, por favor intenta nuevamente."
+                structured = result.get("structured_response")
+                if isinstance(structured, CitaStructuredResponse):
+                    if structured.reply is None:
+                        logger.warning("[AGENT] structured.reply es None - Session: %s", session_id)
+                        reply = "No recibí respuesta del asistente, por favor intenta nuevamente."
+                    elif structured.reply == "":
+                        logger.warning("[AGENT] structured.reply es string vacío - Session: %s", session_id)
+                        reply = "El asistente envió una respuesta vacía, por favor intenta nuevamente."
+                    else:
+                        reply = structured.reply
+                    url = structured.url if (structured.url and structured.url.strip()) else None
                 else:
-                    reply = structured.reply
-                url = structured.url if (structured.url and structured.url.strip()) else None
-            else:
-                logger.warning("[AGENT] Respuesta fuera de formato estructurado - Session: %s", session_id)
-                messages = result.get("messages", [])
-                if messages:
-                    last_message = messages[-1]
-                    reply = last_message.content if hasattr(last_message, "content") else str(last_message)
-                    if not reply:
-                        logger.warning("[AGENT] last_message.content vacío - Session: %s", session_id)
+                    logger.warning("[AGENT] Respuesta fuera de formato estructurado - Session: %s", session_id)
+                    messages = result.get("messages", [])
+                    if messages:
+                        last_message = messages[-1]
+                        reply = last_message.content if hasattr(last_message, "content") else str(last_message)
+                        if not reply:
+                            logger.warning("[AGENT] last_message.content vacío - Session: %s", session_id)
+                            reply = "El asistente respondió en un formato inesperado, por favor intenta nuevamente."
+                    else:
                         reply = "El asistente respondió en un formato inesperado, por favor intenta nuevamente."
-                else:
-                    reply = "El asistente respondió en un formato inesperado, por favor intenta nuevamente."
-                url = None
+                    url = None
 
-            logger.debug("[AGENT] Respuesta generada: %s...", (reply[:200], url))
+                logger.debug("[AGENT] Respuesta generada: %s...", (reply[:200], url))
 
-        except tuple(_OPENAI_ERRORS.keys()) as e:
-            log_level, error_key, log_tag, user_msg = _OPENAI_ERRORS[type(e)]
-            getattr(logger, log_level)("[AGENT][%s] Session: %s | %s", log_tag, session_id, e)
-            record_chat_error(error_key)
-            return (user_msg, None)
-        except Exception as e:
-            logger.error("[AGENT] Error inesperado (%s) - Session: %s | %s", type(e).__name__, session_id, e, exc_info=True)
-            record_chat_error("agent_execution_error")
-            return ("Disculpa, tuve un problema al procesar tu mensaje. ¿Podrías intentar nuevamente?", None)
+            except tuple(_OPENAI_ERRORS.keys()) as e:
+                log_level, error_key, log_tag, user_msg = _OPENAI_ERRORS[type(e)]
+                getattr(logger, log_level)("[AGENT][%s] Session: %s | %s", log_tag, session_id, e)
+                record_chat_error(error_key)
+                return (user_msg, None)
+            except Exception as e:
+                logger.error("[AGENT] Error inesperado (%s) - Session: %s | %s", type(e).__name__, session_id, e, exc_info=True)
+                record_chat_error("agent_execution_error")
+                return ("Disculpa, tuve un problema al procesar tu mensaje. ¿Podrías intentar nuevamente?", None)
 
     return (reply, url)
