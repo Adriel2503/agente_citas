@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from .. import config as app_config
+from ..services.scheduling.time_parser import parse_time
 
 # Patrón básico para email (RFC 5322 simplificado)
 _EMAIL_PATTERN = re.compile(
@@ -58,15 +59,11 @@ def _check_date(v: str) -> str:
 
 def _check_time(v: str) -> str:
     v = v.strip().upper()
-    for fmt in ["%I:%M %p", "%I:%M%p", "%H:%M"]:
-        try:
-            datetime.strptime(v, fmt)
-            return v
-        except ValueError:
-            continue
-    raise ValueError(
-        'Formato de hora inválido. Debe ser HH:MM AM/PM (ejemplo: 02:30 PM) o HH:MM (ejemplo: 14:30)'
-    )
+    if parse_time(v) is None:
+        raise ValueError(
+            'Formato de hora inválido. Debe ser HH:MM AM/PM (ejemplo: 02:30 PM) o HH:MM (ejemplo: 14:30)'
+        )
+    return v
 
 
 # ========== MODELOS PYDANTIC ==========
