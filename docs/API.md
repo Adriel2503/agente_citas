@@ -41,17 +41,16 @@ Content-Type: application/json
 {
   "message": "Quiero agendar una reunión para mañana a las 2pm",
   "session_id": 12345,
-  "context": {
-    "config": {
-      "id_empresa": 123,
-      "usuario_id": 7,
-      "correo_usuario": "vendedor@empresa.com",
-      "personalidad": "amable y profesional",
-      "duracion_cita_minutos": 60,
-      "slots": 60,
-      "agendar_usuario": 1,
-      "agendar_sucursal": 0
-    }
+  "id_empresa": 123,
+  "api_key": "sk-...",
+  "config": {
+    "usuario_id": 7,
+    "correo_usuario": "vendedor@empresa.com",
+    "personalidad": "amable y profesional",
+    "duracion_cita_minutos": 60,
+    "slots": 60,
+    "agendar_usuario": 1,
+    "agendar_sucursal": 0
   }
 }
 ```
@@ -61,47 +60,49 @@ Content-Type: application/json
 | Campo | Tipo | Requerido | Descripción |
 |-------|------|-----------|-------------|
 | `message` | string | ✅ Sí | Mensaje del usuario (1–4096 chars). Puede contener URLs de imágenes (Vision) |
-| `session_id` | **integer** | ✅ Sí | ID de sesión numérico (≥ 0). Usado como `thread_id` del checkpointer y como `id_prospecto` |
-| `context` | object | ❌ No | Contexto de configuración del bot. Si se omite, se usa `{}` |
+| `session_id` | **integer** | ✅ Sí | ID de sesión numérico. Usado como `thread_id` del checkpointer y como `id_prospecto` |
+| `id_empresa` | **integer** | ✅ Sí | ID de la empresa (tenant key). Determina horarios, contexto y catálogo |
+| `api_key` | **string** | ✅ Sí | API key de OpenAI del tenant. Viene del gateway (no se configura como env var) |
+| `config` | object | ❌ No | Configuración del bot (CitasConfig). Si se omite, usa defaults |
 
-##### Campos de `context.config`
+##### Campos de `config` (CitasConfig)
 
 | Campo | Tipo | Requerido | Default | Uso | Descripción |
 |-------|------|-----------|---------|-----|-------------|
-| `id_empresa` | integer | ✅ Sí | — | Tools + Prompt | ID de la empresa. Determina horarios, contexto y catálogo |
 | `usuario_id` | integer | ❌ No | `None` | CREAR_EVENTO | ID del vendedor (campo `usuario_id` en payload del calendario). Requerido para crear cita |
 | `correo_usuario` | string | ❌ No | `None` | CREAR_EVENTO | Email del vendedor (invitación Google Calendar). Requerido para crear cita |
 | `personalidad` | string | ❌ No | `"amable, profesional y eficiente"` | Prompt | Tono/personalidad del agente |
-| `nombre_bot` | string | ❌ No | `"Asistente"` | Prompt | Nombre con el que el agente se presenta |
-| `frase_saludo` | string | ❌ No | `"¡Hola! ¿En qué puedo ayudarte?"` | Prompt | Saludo inicial |
-| `frase_des` | string | ❌ No | `"¡Gracias por contactarnos!"` | Prompt | Frase de despedida |
-| `frase_no_sabe` | string | ❌ No | `"No tengo esa información a mano; te puedo ayudar a agendar una reunión para que te lo confirmen."` | Prompt | Frase cuando el agente no sabe algo |
-| `archivo_saludo` | string | ❌ No | `""` | Prompt + `url` | URL de imagen/video de saludo. Se envía en `url` del primer mensaje |
-| `id_chatbot` | integer | ❌ No | — | Prompt | ID del chatbot para cargar FAQs desde `ws_preguntas_frecuentes.php` |
-| `duracion_cita_minutos` | integer | ❌ No | `60` | Tools | Duración de la cita en minutos (validación de horario + cálculo de `fecha_fin`) |
-| `slots` | integer | ❌ No | `60` | Tools | Slots de disponibilidad para CONSULTAR_DISPONIBILIDAD y SUGERIR_HORARIOS |
+| `nombre_bot` | string | ❌ No | `None` | Prompt | Nombre con el que el agente se presenta |
+| `frase_saludo` | string | ❌ No | `None` | Prompt | Saludo inicial |
+| `frase_des` | string | ❌ No | `None` | Prompt | Frase de despedida |
+| `frase_no_sabe` | string | ❌ No | `None` | Prompt | Frase cuando el agente no sabe algo |
+| `archivo_saludo` | string | ❌ No | `None` | Prompt + `url` | URL de imagen/video de saludo. Se envía en `url` del primer mensaje |
+| `id_chatbot` | integer | ❌ No | `None` | Prompt | ID del chatbot para cargar FAQs desde `ws_preguntas_frecuentes.php` |
+| `duracion_cita_minutos` | integer | ❌ No | `None` | Tools | Duración de la cita en minutos (validación de horario + cálculo de `fecha_fin`) |
+| `slots` | integer | ❌ No | `None` | Tools | Slots de disponibilidad para CONSULTAR_DISPONIBILIDAD y SUGERIR_HORARIOS |
 | `agendar_usuario` | boolean/integer | ❌ No | `1` | Tools | `1` = asignar vendedor automáticamente al crear evento |
 | `agendar_sucursal` | boolean/integer | ❌ No | `0` | Tools | `1` = agendar por sucursal |
 
 > **Notas:**
 > - El campo se llama `usuario_id` (no `id_usuario`).
+> - `id_empresa` y `api_key` son top-level (el gateway siempre los envía). `config` es opcional con `extra="ignore"`.
 > - El `session_id` del request se usa internamente como `id_prospecto` al crear el evento.
-> - Los campos marcados "Prompt" se inyectan en el system prompt al crear el agente (cacheado por `id_empresa`, TTL 60 min).
+> - Los campos marcados "Prompt" se inyectan en el system prompt al crear el agente (cacheado por `(id_empresa, key_hash)`, TTL 60 min).
 > - Los campos marcados "Tools" se inyectan en tiempo real a cada tool via `AgentContext` (sin cache).
 
 ##### Flujo de los campos de config
 
 ```
-context.config del gateway
+config del gateway (CitasConfig)
     │
-    ├─► Prompt (cacheado 60 min por id_empresa):
+    ├─► Prompt (cacheado 60 min por (id_empresa, key_hash)):
     │     personalidad, nombre_bot, frase_saludo, frase_des,
     │     frase_no_sabe, archivo_saludo, id_chatbot
     │
     └─► AgentContext (inyectado en cada tool call):
           id_empresa, usuario_id, correo_usuario,
           duracion_cita_minutos, slots, agendar_usuario,
-          agendar_sucursal, id_prospecto (=session_id)
+          agendar_sucursal, session_id
 ```
 
 ##### Soporte de imágenes (Vision)
@@ -112,7 +113,8 @@ Si `message` contiene URLs de imágenes (`.jpg`, `.jpeg`, `.png`, `.gif`, `.webp
 {
   "message": "¿Pueden replicar este diseño? https://ejemplo.com/foto.jpg Para el viernes",
   "session_id": 12345,
-  "context": {"config": {"id_empresa": 123}}
+  "id_empresa": 123,
+  "api_key": "sk-..."
 }
 ```
 
@@ -225,12 +227,11 @@ Devuelve métricas en formato Prometheus text/plain. Diseñado para scraping por
 {
   "message": "Hola, quiero agendar una reunión",
   "session_id": 1001,
-  "context": {
-    "config": {
-      "id_empresa": 123,
-      "nombre_bot": "Mara",
-      "personalidad": "amable y profesional"
-    }
+  "id_empresa": 123,
+  "api_key": "sk-...",
+  "config": {
+    "nombre_bot": "Mara",
+    "personalidad": "amable y profesional"
   }
 }
 ```
@@ -252,11 +253,8 @@ Devuelve métricas en formato Prometheus text/plain. Diseñado para scraping por
 {
   "message": "Para mañana a las 3pm",
   "session_id": 1001,
-  "context": {
-    "config": {
-      "id_empresa": 123
-    }
-  }
+  "id_empresa": 123,
+  "api_key": "sk-..."
 }
 ```
 
@@ -277,12 +275,11 @@ Devuelve métricas en formato Prometheus text/plain. Diseñado para scraping por
 {
   "message": "Juan Pérez, juan.perez@email.com",
   "session_id": 1001,
-  "context": {
-    "config": {
-      "id_empresa": 123,
-      "usuario_id": 7,
-      "correo_usuario": "vendedor@empresa.com"
-    }
+  "id_empresa": 123,
+  "api_key": "sk-...",
+  "config": {
+    "usuario_id": 7,
+    "correo_usuario": "vendedor@empresa.com"
   }
 }
 ```
@@ -306,11 +303,8 @@ Devuelve métricas en formato Prometheus text/plain. Diseñado para scraping por
 {
   "message": "¿Qué horarios tienen disponibles para hoy?",
   "session_id": 1002,
-  "context": {
-    "config": {
-      "id_empresa": 123
-    }
-  }
+  "id_empresa": 123,
+  "api_key": "sk-..."
 }
 ```
 
@@ -331,11 +325,8 @@ Devuelve métricas en formato Prometheus text/plain. Diseñado para scraping por
 {
   "message": "¿El viernes a las 4pm tienen disponibilidad?",
   "session_id": 1003,
-  "context": {
-    "config": {
-      "id_empresa": 123
-    }
-  }
+  "id_empresa": 123,
+  "api_key": "sk-..."
 }
 ```
 
@@ -356,11 +347,8 @@ Devuelve métricas en formato Prometheus text/plain. Diseñado para scraping por
 {
   "message": "¿Cuánto cuesta el servicio de consultoría estratégica?",
   "session_id": 1004,
-  "context": {
-    "config": {
-      "id_empresa": 123
-    }
-  }
+  "id_empresa": 123,
+  "api_key": "sk-..."
 }
 ```
 
@@ -381,21 +369,20 @@ Devuelve métricas en formato Prometheus text/plain. Diseñado para scraping por
 {
   "message": "Buenos días",
   "session_id": 9999,
-  "context": {
-    "config": {
-      "id_empresa": 456,
-      "usuario_id": 12,
-      "correo_usuario": "asesor@miempresa.com",
-      "personalidad": "entusiasta y directo",
-      "nombre_bot": "Alex",
-      "frase_saludo": "¡Hola! Soy Alex, tu asistente de citas.",
-      "frase_des": "¡Hasta pronto! Fue un placer atenderte.",
-      "frase_no_sabe": "No tengo esa información, pero puedo conectarte con un asesor.",
-      "duracion_cita_minutos": 45,
-      "slots": 30,
-      "agendar_usuario": 1,
-      "agendar_sucursal": 0
-    }
+  "id_empresa": 456,
+  "api_key": "sk-...",
+  "config": {
+    "usuario_id": 12,
+    "correo_usuario": "asesor@miempresa.com",
+    "personalidad": "entusiasta y directo",
+    "nombre_bot": "Alex",
+    "frase_saludo": "¡Hola! Soy Alex, tu asistente de citas.",
+    "frase_des": "¡Hasta pronto! Fue un placer atenderte.",
+    "frase_no_sabe": "No tengo esa información, pero puedo conectarte con un asesor.",
+    "duracion_cita_minutos": 45,
+    "slots": 30,
+    "agendar_usuario": 1,
+    "agendar_sucursal": 0
   }
 }
 ```
@@ -416,13 +403,18 @@ El agente siempre responde con HTTP 200. Los errores se comunican en texto dentr
 
 ### Error: `id_empresa` faltante
 
-**Causa:** No se envió `context.config.id_empresa` o su valor es `null`.
+**Causa:** No se envió `id_empresa` en el body o su valor es `null`. Es un campo requerido validado por Pydantic.
 
-**Response:**
+**Response:** HTTP 422 (validación de Pydantic/FastAPI):
 ```json
 {
-  "reply": "Error de configuración: Context missing required key in config: id_empresa",
-  "url": null
+  "detail": [
+    {
+      "type": "missing",
+      "loc": ["body", "id_empresa"],
+      "msg": "Field required"
+    }
+  ]
 }
 ```
 
@@ -682,32 +674,32 @@ GET http://localhost:8002/metrics
 
 ```prometheus
 # ── Conversaciones ──
-agent_citas_chat_requests_total{empresa_id="123"} 150
-agent_citas_chat_errors_total{error_type="context_error"} 2
-agent_citas_chat_errors_total{error_type="agent_creation_error"} 0
-agent_citas_chat_errors_total{error_type="agent_execution_error"} 1
+citas_chat_requests_total{empresa_id="123"} 150
+citas_chat_errors_total{error_type="context_error"} 2
+citas_chat_errors_total{error_type="agent_creation_error"} 0
+citas_chat_errors_total{error_type="agent_execution_error"} 1
 
 # ── Citas ──
-agent_citas_booking_attempts_total 50
-agent_citas_booking_success_total 42
-agent_citas_booking_failed_total{reason="timeout"} 2
-agent_citas_booking_failed_total{reason="api_error"} 1
-agent_citas_booking_failed_total{reason="invalid_datetime"} 3
-agent_citas_booking_failed_total{reason="circuit_open"} 0
-agent_citas_booking_failed_total{reason="connection_error"} 1
-agent_citas_booking_failed_total{reason="http_500"} 0
+citas_booking_attempts_total 50
+citas_booking_success_total 42
+citas_booking_failed_total{reason="timeout"} 2
+citas_booking_failed_total{reason="api_error"} 1
+citas_booking_failed_total{reason="invalid_datetime"} 3
+citas_booking_failed_total{reason="circuit_open"} 0
+citas_booking_failed_total{reason="connection_error"} 1
+citas_booking_failed_total{reason="http_500"} 0
 
 # ── Tools ──
-agent_citas_tool_calls_total{tool_name="check_availability"} 98
-agent_citas_tool_calls_total{tool_name="create_booking"} 45
-agent_citas_tool_calls_total{tool_name="search_productos_servicios"} 27
-agent_citas_tool_errors_total{tool_name="create_booking",error_type="TimeoutError"} 1
+citas_tool_calls_total{tool_name="check_availability"} 98
+citas_tool_calls_total{tool_name="create_booking"} 45
+citas_tool_calls_total{tool_name="search_productos_servicios"} 27
+citas_tool_errors_total{tool_name="create_booking",error_type="TimeoutError"} 1
 
 # ── APIs externas ──
-agent_citas_api_calls_total{endpoint="consultar_disponibilidad",status="success"} 90
-agent_citas_api_calls_total{endpoint="sugerir_horarios",status="success"} 30
-agent_citas_api_calls_total{endpoint="crear_evento",status="success"} 42
-agent_citas_api_calls_total{endpoint="crear_evento",status="error_TimeoutException"} 2
+citas_api_calls_total{endpoint="consultar_disponibilidad",status="success"} 90
+citas_api_calls_total{endpoint="sugerir_horarios",status="success"} 30
+citas_api_calls_total{endpoint="crear_evento",status="success"} 42
+citas_api_calls_total{endpoint="crear_evento",status="error_TimeoutException"} 2
 
 # ── HTTP layer (/api/chat) ──
 citas_http_requests_total{status="success"} 145
@@ -733,31 +725,31 @@ citas_http_duration_seconds_bucket{le="10.0"} 140
 citas_http_duration_seconds_bucket{le="120.0"} 150
 
 # Latencia de respuesta del chat (dentro del agente)
-agent_citas_chat_response_duration_seconds_bucket{status="success",le="5.0"} 130
-agent_citas_chat_response_duration_seconds_bucket{status="error",le="5.0"} 2
+citas_chat_response_duration_seconds_bucket{status="success",le="5.0"} 130
+citas_chat_response_duration_seconds_bucket{status="error",le="5.0"} 2
 
 # Latencia de ejecución de tools
-agent_citas_tool_execution_duration_seconds_bucket{tool_name="check_availability",le="5.0"} 90
-agent_citas_tool_execution_duration_seconds_bucket{tool_name="create_booking",le="10.0"} 44
-agent_citas_tool_execution_duration_seconds_bucket{tool_name="search_productos_servicios",le="5.0"} 25
+citas_tool_execution_duration_seconds_bucket{tool_name="check_availability",le="5.0"} 90
+citas_tool_execution_duration_seconds_bucket{tool_name="create_booking",le="10.0"} 44
+citas_tool_execution_duration_seconds_bucket{tool_name="search_productos_servicios",le="5.0"} 25
 
 # Latencia de llamadas a APIs externas
-agent_citas_api_call_duration_seconds_bucket{endpoint="consultar_disponibilidad",le="2.5"} 85
-agent_citas_api_call_duration_seconds_bucket{endpoint="crear_evento",le="5.0"} 40
+citas_api_call_duration_seconds_bucket{endpoint="consultar_disponibilidad",le="2.5"} 85
+citas_api_call_duration_seconds_bucket{endpoint="crear_evento",le="5.0"} 40
 
 # Latencia de llamadas al LLM
-agent_citas_llm_call_duration_seconds_bucket{status="success",le="5.0"} 120
-agent_citas_llm_call_duration_seconds_bucket{status="error",le="5.0"} 2
+citas_llm_call_duration_seconds_bucket{status="success",le="5.0"} 120
+citas_llm_call_duration_seconds_bucket{status="error",le="5.0"} 2
 ```
 
 ### Gauges y Info
 
 ```prometheus
 # Entradas actuales en caches
-agent_citas_cache_entries{cache_type="schedule"} 8
+citas_cache_entries{cache_type="schedule"} 8
 
 # Información del agente
-agent_citas_info{agent_type="citas",model="gpt-4o-mini",version="2.5.0"} 1
+citas_info{agent_type="citas",model="gpt-4o-mini",version="2.5.0"} 1
 ```
 
 ---
@@ -773,6 +765,7 @@ async def chat_citas(
     mensaje: str,
     session_id: int,
     id_empresa: int,
+    api_key: str,
     usuario_id: int = 1,
     correo_usuario: str = ""
 ) -> tuple[str, str | None]:
@@ -783,12 +776,11 @@ async def chat_citas(
             json={
                 "message": mensaje,
                 "session_id": session_id,
-                "context": {
-                    "config": {
-                        "id_empresa": id_empresa,
-                        "usuario_id": usuario_id,
-                        "correo_usuario": correo_usuario,
-                    }
+                "id_empresa": id_empresa,
+                "api_key": api_key,
+                "config": {
+                    "usuario_id": usuario_id,
+                    "correo_usuario": correo_usuario,
                 }
             }
         )
@@ -812,7 +804,9 @@ import (
 type ChatRequest struct {
     Message   string                 `json:"message"`
     SessionID int                    `json:"session_id"`
-    Context   map[string]interface{} `json:"context"`
+    IDEmpresa int                    `json:"id_empresa"`
+    APIKey    string                 `json:"api_key"`
+    Config    map[string]interface{} `json:"config,omitempty"`
 }
 
 type ChatResponse struct {
@@ -820,15 +814,12 @@ type ChatResponse struct {
     URL   *string `json:"url"`
 }
 
-func chatCitas(mensaje string, sessionID int, idEmpresa int) (string, error) {
+func chatCitas(mensaje string, sessionID int, idEmpresa int, apiKey string) (string, error) {
     body, _ := json.Marshal(ChatRequest{
         Message:   mensaje,
         SessionID: sessionID,
-        Context: map[string]interface{}{
-            "config": map[string]interface{}{
-                "id_empresa": idEmpresa,
-            },
-        },
+        IDEmpresa: idEmpresa,
+        APIKey:    apiKey,
     })
 
     resp, err := http.Post(
@@ -855,12 +846,9 @@ curl -X POST http://localhost:8002/api/chat \
   -d '{
     "message": "Quiero una cita para mañana a las 10am",
     "session_id": 12345,
-    "context": {
-      "config": {
-        "id_empresa": 123,
-        "usuario_id": 1
-      }
-    }
+    "id_empresa": 123,
+    "api_key": "sk-...",
+    "config": {"usuario_id": 1}
   }'
 ```
 
@@ -873,7 +861,7 @@ Las tools son funciones internas que el LLM invoca vía function calling. **El g
 ### Origen de cada parámetro
 
 > **🤖 IA** = el LLM decide el valor basándose en la conversación.
-> **🔧 Gateway** = viene de `context.config` del request, inyectado vía `AgentContext`.
+> **🔧 Gateway** = viene de `config` (CitasConfig) del request, inyectado vía `AgentContext`.
 > **🔢 Código** = calculado por el código Python (ni IA ni gateway).
 
 ---
@@ -974,7 +962,7 @@ Las tools son funciones internas que el LLM invoca vía function calling. **El g
 **Pipeline de 3 fases:**
 
 ```
-Fase 1 — Validación Pydantic (tool/validation.py)
+Fase 1 — Validación Pydantic (tools/validation.py)
   ├─ date: YYYY-MM-DD, no pasado
   ├─ time: HH:MM AM/PM o HH:MM
   ├─ customer_name: ≥2 chars, sin números, sin chars peligrosos → title()
@@ -1135,7 +1123,7 @@ El system prompt instruye al agente a usar formato compatible con WhatsApp:
 
 ### Memoria conversacional
 
-La memoria es automática via `InMemorySaver` de LangGraph. El agente recuerda la conversación del mismo `session_id` sin necesidad de enviar historial. Si el servidor se reinicia, la memoria se pierde.
+La memoria es automática via el checkpointer de LangGraph (`AsyncRedisSaver` con TTL 24h si `REDIS_URL` está configurado, o `InMemorySaver` como fallback). El agente recuerda la conversación del mismo `session_id` sin necesidad de enviar historial. Con Redis, la memoria persiste al reiniciar; sin Redis, se pierde.
 
 El LLM recibe solo los últimos `MAX_MESSAGES_HISTORY` mensajes (default 20) para controlar el costo de tokens en sesiones largas. El checkpointer conserva el historial completo.
 
@@ -1193,11 +1181,11 @@ Si una API falla, el agente no se cae — degrada funcionalidad:
 
 | Cache | TTL | Key | Maxsize | Anti-thundering herd |
 |-------|-----|-----|---------|---------------------|
-| Agente (grafo compilado + prompt) | 60 min | `(id_empresa,)` | 500 | `asyncio.Lock` + double-check |
+| Agente (grafo compilado + prompt) | 60 min | `(id_empresa, key_hash)` | 500 | `asyncio.Lock` + double-check |
 | Búsqueda productos | 15 min | `(id_empresa, busqueda)` | 2000 | `asyncio.Lock` + double-check |
-| Checkpointer (sesiones) | ∞ (sin TTL) | `session_id` | ∞ | Session lock |
+| Checkpointer (sesiones) | 24h (Redis) / ∞ (InMemory) | `session_id` | ∞ | Session lock |
 
-> **Nota:** Horarios, contexto de negocio y FAQs **no tienen cache propio** — se obtienen de la API al construir el agente y quedan cacheados dentro del agente compilado (TTL 60 min). El checkpointer `InMemorySaver` no tiene TTL ni límite; la memoria se pierde si el servidor se reinicia. Pendiente migrar a `AsyncRedisSaver` con TTL 24h (ver [PENDIENTES.md](PENDIENTES.md#c1--inmemorysaver-sin-ttl-memory-leak)).
+> **Nota:** Horarios, contexto de negocio y FAQs **no tienen cache propio** — se obtienen de la API al construir el agente y quedan cacheados dentro del agente compilado (TTL 60 min). El checkpointer soporta `AsyncRedisSaver` con TTL configurable (`REDIS_CHECKPOINT_TTL_HOURS`, default 24h) y fallback a `InMemorySaver` si Redis no está disponible.
 
 ---
 
@@ -1291,7 +1279,9 @@ Cuando el cache del agente expira (cada 60 min), el primer request de esa empres
 | `TIMEZONE` | `"America/Lima"` | Zona horaria para fechas y validaciones |
 | `LOG_LEVEL` | `"INFO"` | Nivel de logging (DEBUG, INFO, WARNING, ERROR, CRITICAL) |
 | `LOG_FILE` | `""` | Ruta de archivo de log (vacío = solo stdout) |
-| `REDIS_URL` | `""` | URL de Redis (pendiente para AsyncRedisSaver) |
+| `REDIS_URL` | `""` | URL de Redis para AsyncRedisSaver (vacío = InMemorySaver) |
+| `REDIS_CHECKPOINT_TTL_HOURS` | `24` | TTL de sesiones en Redis (0 = sin TTL) |
+| `MAX_CONCURRENT_AGENT` | `50` | Máx invocaciones concurrentes al agente (backpressure) |
 
 ---
 
