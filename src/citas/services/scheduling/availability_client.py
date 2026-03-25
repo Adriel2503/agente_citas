@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from ...logger import get_logger
-from ...metrics import track_api_call, degradation_total
+from ...metrics import track_api_call, DEGRADATION_TOTAL
 from ... import config as app_config
 from ...infra import post_with_logging, resilient_call, CircuitBreaker
 from ...config import agendar_reunion_cb as _default_agendar_cb
@@ -58,7 +58,7 @@ async def check_slot_availability(
         fecha = datetime.strptime(fecha_str, "%Y-%m-%d")
         hora = parse_time(hora_str)
         if not hora:
-            degradation_total.labels(service="availability_check", reason="parse_error").inc()
+            DEGRADATION_TOTAL.labels(service="availability_check", reason="parse_error").inc()
             return {"available": True, "error": None}
 
         fecha_hora_inicio = fecha.replace(hour=hora.hour, minute=hora.minute)
@@ -98,7 +98,7 @@ async def check_slot_availability(
 
         if not data.get("success"):
             logger.warning("[AVAILABILITY] Respuesta sin éxito: %s", data)
-            degradation_total.labels(service="availability_check", reason="api_success_false").inc()
+            DEGRADATION_TOTAL.labels(service="availability_check", reason="api_success_false").inc()
             return {"available": True, "error": None}  # Graceful degradation
 
         if data.get("disponible"):
@@ -110,19 +110,19 @@ async def check_slot_availability(
 
     except RuntimeError:
         logger.warning("[AVAILABILITY] Circuit abierto para ws_agendar_reunion")
-        degradation_total.labels(service="availability_check", reason="circuit_open").inc()
+        DEGRADATION_TOTAL.labels(service="availability_check", reason="circuit_open").inc()
         return {"available": True, "error": None}
     except httpx.TimeoutException:
         logger.warning("[AVAILABILITY] Timeout - graceful degradation")
-        degradation_total.labels(service="availability_check", reason="timeout").inc()
+        DEGRADATION_TOTAL.labels(service="availability_check", reason="timeout").inc()
         return {"available": True, "error": None}
     except httpx.HTTPError as e:
         logger.warning("[AVAILABILITY] Error HTTP: %s - graceful degradation", e)
-        degradation_total.labels(service="availability_check", reason="http_error").inc()
+        DEGRADATION_TOTAL.labels(service="availability_check", reason="http_error").inc()
         return {"available": True, "error": None}
     except Exception as e:
         logger.warning("[AVAILABILITY] Error inesperado: %s - graceful degradation", e)
-        degradation_total.labels(service="availability_check", reason="unknown").inc()
+        DEGRADATION_TOTAL.labels(service="availability_check", reason="unknown").inc()
         return {"available": True, "error": None}
 
 

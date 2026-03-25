@@ -12,13 +12,13 @@ from langchain.agents import create_agent
 
 from .runtime import (
     get_model, get_checkpointer,
-    get_cached_agent, cache_agent, agent_cache_size, agent_cache_ttl,
+    get_cached_agent, cache_agent, agent_cache_size,
     acquire_agent_lock, release_agent_lock, acquire_session_lock,
     message_window,
 )
 from ..tools.tools import AGENT_TOOLS
 from ..logger import get_logger
-from ..metrics import track_chat_response, track_llm_call, record_chat_error, chat_requests_total, AGENT_CACHE, update_cache_stats
+from ..metrics import track_chat_response, track_llm_call, record_chat_error, CHAT_REQUESTS, AGENT_CACHE, update_cache_stats, record_token_usage
 from .prompts import build_citas_system_prompt
 from .content import CitaStructuredResponse, _build_content
 from .context import _prepare_agent_context
@@ -40,73 +40,65 @@ _OPENAI_ERRORS: dict[type, tuple[str, str, str, str]] = {
 }
 
 
+async def _build_agent_for_empresa(id_empresa: int, api_key: str, config: CitasConfig | None):
+    """
+    Construye un nuevo agente para la empresa. Se llama SOLO en cache miss.
+    El agente resultante es compartido por todos los usuarios de esa empresa;
+    el aislamiento de sesión lo provee el checkpointer vía thread_id.
+    """
+    logger.info("[AGENT] Construyendo agente para id_empresa=%s", id_empresa)
+    system_prompt = await build_citas_system_prompt(id_empresa=id_empresa, config=config)
+    agent = create_agent(
+        model=get_model(api_key),
+        tools=AGENT_TOOLS,
+        system_prompt=system_prompt,
+        checkpointer=get_checkpointer(),
+        response_format=CitaStructuredResponse,
+        middleware=[message_window],
+    )
+    logger.info(
+        "[AGENT] Agente listo para id_empresa=%s (tools=%s, TTL=%s min)",
+        id_empresa, len(AGENT_TOOLS), app_config.AGENT_CACHE_TTL_MINUTES,
+    )
+    return agent
+
+
 async def _get_agent(id_empresa: int, api_key: str, config: CitasConfig | None):
     """
-    Devuelve el agente compilado para id_empresa.
+    Retorna el agente para esta empresa.
 
-    Utiliza TTLCache para evitar recrear el cliente OpenAI, las HTTP calls
-    del prompt y la compilación del grafo LangGraph en cada mensaje. El TTL
-    se gobierna con AGENT_CACHE_TTL_MINUTES (default 60 min), independiente
-    del horario de reuniones (sin cache propio).
-
-    Incluye doble verificación con asyncio.Lock por cache_key para serializar
-    la primera creación cuando múltiples sesiones de la misma empresa llegan
-    concurrentemente (thundering herd).
-
-    Args:
-        id_empresa: ID de la empresa (tenant key).
-        config: CitasConfig opcional con configuración del agente (personalidad, nombre, etc.).
-
-    Returns:
-        Agente configurado con tools y checkpointer
+    - Fast path (cache hit): O(1), sin I/O.
+    - Slow path (cache miss): Lock por cache_key + double-check post-lock.
+      N requests concurrentes serializan; solo el primero construye.
     """
     _key_hash = hashlib.sha256(api_key.encode()).hexdigest()[:12]
     cache_key: tuple = (id_empresa, _key_hash)
 
-    # Fast path: cache hit (sin await, atómico en asyncio single-thread)
+    # Fast path — sin lock
     cached = get_cached_agent(cache_key)
     if cached is not None:
         AGENT_CACHE.labels(result="hit").inc()
         update_cache_stats("agent", agent_cache_size())
-        logger.debug("[AGENT] Cache hit - id_empresa=%s", cache_key[0])
+        logger.debug("[AGENT] Cache HIT id_empresa=%s", id_empresa)
         return cached
 
     # Slow path: serializar creación para evitar thundering herd
     lock = acquire_agent_lock(cache_key)
     try:
         async with lock:
-            # Double-check tras adquirir el lock (otra coroutine pudo haberlo creado)
+            # Double-check: otro request puede haber construido el agente
+            # mientras esperábamos el lock
             cached = get_cached_agent(cache_key)
             if cached is not None:
                 AGENT_CACHE.labels(result="hit").inc()
                 update_cache_stats("agent", agent_cache_size())
-                logger.debug("[AGENT] Cache hit tras lock - id_empresa=%s", cache_key[0])
+                logger.debug("[AGENT] Cache HIT (post-lock) id_empresa=%s", id_empresa)
                 return cached
 
             AGENT_CACHE.labels(result="miss").inc()
-            logger.debug("[AGENT] Creando agente con LangChain 1.2+ API - id_empresa=%s", cache_key[0])
-
-            # Construir system prompt usando template Jinja2 (async: carga horario y productos en paralelo)
-            system_prompt = await build_citas_system_prompt(id_empresa=id_empresa, config=config)
-
-            # Crear agente con API moderna (response_format: reply + url opcional)
-            agent = create_agent(
-                model=get_model(api_key),
-                tools=AGENT_TOOLS,
-                system_prompt=system_prompt,
-                checkpointer=get_checkpointer(),
-                response_format=CitaStructuredResponse,
-                middleware=[message_window],
-            )
-
+            agent = await _build_agent_for_empresa(id_empresa, api_key, config)
             cache_agent(cache_key, agent)
             update_cache_stats("agent", agent_cache_size())
-            logger.debug(
-                "[AGENT] Agente cacheado - id_empresa=%s, Tools: %s, TTL: %ss",
-                cache_key[0],
-                len(AGENT_TOOLS),
-                agent_cache_ttl(),
-            )
             return agent
     finally:
         release_agent_lock(cache_key)
@@ -158,7 +150,7 @@ async def process_cita_message(
 
     # Registrar request con label de baja cardinalidad (por empresa, no por sesión)
     _empresa_id = str(id_empresa)
-    chat_requests_total.labels(empresa_id=_empresa_id).inc()
+    CHAT_REQUESTS.labels(empresa_id=_empresa_id).inc()
 
     # Backpressure: limitar invocaciones concurrentes al agente (OpenAI + tools)
     async with _semaphore:
@@ -219,6 +211,19 @@ async def process_cita_message(
                     else:
                         reply = "El asistente respondió en un formato inesperado, por favor intenta nuevamente."
                     url = None
+
+                # Extraer tokens de todos los AIMessage
+                _input_tokens = 0
+                _output_tokens = 0
+                for msg in result.get("messages", []):
+                    um = getattr(msg, "usage_metadata", None)
+                    if um:
+                        _input_tokens += um.get("input_tokens", 0)
+                        _output_tokens += um.get("output_tokens", 0)
+                if _input_tokens or _output_tokens:
+                    record_token_usage(_empresa_id, _input_tokens, _output_tokens)
+                    logger.debug("[AGENT] Tokens — input=%s, output=%s, total=%s, empresa=%s",
+                                 _input_tokens, _output_tokens, _input_tokens + _output_tokens, _empresa_id)
 
                 logger.debug("[AGENT] Respuesta generada: %s...", (reply[:200], url))
 

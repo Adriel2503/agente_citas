@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 import httpx
 
 from ...logger import get_logger
-from ...metrics import degradation_total
+from ...metrics import DEGRADATION_TOTAL
 from ... import config as app_config
 from ...infra import post_with_logging, resilient_call, CircuitBreaker
 from ...config import agendar_reunion_cb as _default_agendar_cb, informacion_cb as _default_informacion_cb
@@ -60,14 +60,14 @@ class ScheduleValidator:
             )
             if data.get("success") and data.get("horario_reuniones"):
                 return data["horario_reuniones"]
-            degradation_total.labels(service="schedule_fetch", reason="api_success_false").inc()
+            DEGRADATION_TOTAL.labels(service="schedule_fetch", reason="api_success_false").inc()
         except RuntimeError:
-            degradation_total.labels(service="schedule_fetch", reason="circuit_open").inc()
+            DEGRADATION_TOTAL.labels(service="schedule_fetch", reason="circuit_open").inc()
         except httpx.TransportError:
-            degradation_total.labels(service="schedule_fetch", reason="transport_error").inc()
+            DEGRADATION_TOTAL.labels(service="schedule_fetch", reason="transport_error").inc()
         except Exception as e:
             logger.warning("[SCHEDULE] Error inesperado en _fetch_horario: %s", e)
-            degradation_total.labels(service="schedule_fetch", reason="unknown").inc()
+            DEGRADATION_TOTAL.labels(service="schedule_fetch", reason="unknown").inc()
         return None
 
     async def validate(self, fecha_str: str, hora_str: str) -> dict[str, Any]:
