@@ -114,6 +114,7 @@ async def chat(req: ChatRequest) -> ChatResponse:
                 message=req.message,
                 session_id=req.session_id,
                 id_empresa=req.id_empresa,
+                api_key=req.api_key,
                 config=config,
             ),
             timeout=app_config.CHAT_TIMEOUT,
@@ -159,8 +160,6 @@ async def chat(req: ChatRequest) -> ChatResponse:
 async def health():
     issues = []
 
-    if not app_config.OPENAI_API_KEY:
-        issues.append("openai_api_key_missing")
     issues.extend(get_health_issues())
 
     status = "degraded" if issues else "ok"

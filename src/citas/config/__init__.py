@@ -1,7 +1,6 @@
 """Re-exporta la configuración del agente de citas (env, timeouts, URLs, circuit breakers)."""
 
 from .config import (
-    OPENAI_API_KEY,
     OPENAI_MODEL,
     OPENAI_TEMPERATURE,
     SERVER_HOST,
@@ -43,7 +42,6 @@ from .circuit_breakers import (
 )
 
 __all__ = [
-    "OPENAI_API_KEY",
     "OPENAI_MODEL",
     "OPENAI_TEMPERATURE",
     "SERVER_HOST",

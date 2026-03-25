@@ -4,6 +4,7 @@ Versión mejorada con logging, métricas, configuración centralizada y memoria 
 """
 
 import asyncio
+import hashlib
 
 import openai
 
@@ -39,7 +40,7 @@ _OPENAI_ERRORS: dict[type, tuple[str, str, str, str]] = {
 }
 
 
-async def _get_agent(id_empresa: int, config: CitasConfig | None):
+async def _get_agent(id_empresa: int, api_key: str, config: CitasConfig | None):
     """
     Devuelve el agente compilado para id_empresa.
 
@@ -59,7 +60,8 @@ async def _get_agent(id_empresa: int, config: CitasConfig | None):
     Returns:
         Agente configurado con tools y checkpointer
     """
-    cache_key: tuple = (id_empresa,)
+    _key_hash = hashlib.sha256(api_key.encode()).hexdigest()[:12]
+    cache_key: tuple = (id_empresa, _key_hash)
 
     # Fast path: cache hit (sin await, atómico en asyncio single-thread)
     cached = get_cached_agent(cache_key)
@@ -89,7 +91,7 @@ async def _get_agent(id_empresa: int, config: CitasConfig | None):
 
             # Crear agente con API moderna (response_format: reply + url opcional)
             agent = create_agent(
-                model=get_model(),
+                model=get_model(api_key),
                 tools=AGENT_TOOLS,
                 system_prompt=system_prompt,
                 checkpointer=get_checkpointer(),
@@ -114,6 +116,7 @@ async def process_cita_message(
     message: str,
     session_id: int,
     id_empresa: int,
+    api_key: str,
     config: CitasConfig | None,
 ) -> tuple[str, str | None]:
     """
@@ -164,7 +167,7 @@ async def process_cita_message(
         lock = acquire_session_lock(session_id)
         async with lock:
             try:
-                agent = await _get_agent(id_empresa, config)
+                agent = await _get_agent(id_empresa, api_key, config)
             except Exception as e:
                 logger.error("[AGENT] Error creando agent: %s", e, exc_info=True)
                 record_chat_error("agent_creation_error")

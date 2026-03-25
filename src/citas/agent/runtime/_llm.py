@@ -24,8 +24,6 @@ logger = get_logger(__name__)
 
 _checkpointer: Any = None
 
-# Modelo LLM: singleton compartido por todas las empresas.
-_model = None
 
 
 def _make_memory_saver() -> InMemorySaver:
@@ -87,23 +85,19 @@ async def init_checkpointer() -> None:
         _checkpointer = _make_memory_saver()
 
 
-def get_model():
+def get_model(api_key: str):
     """
-    Retorna el modelo LLM singleton, creándolo en la primera llamada.
-    init_chat_model es síncrono → no hay race condition en asyncio single-thread.
-    Compartido por todas las empresas: la config viene de variables de entorno.
+    Crea un modelo LLM con la api_key del tenant.
+    Se llama solo en cache miss del agente (~1 vez cada 60 min por empresa).
+    init_chat_model es síncrono y barato (microsegundos, sin network call).
     """
-    global _model
-    if _model is None:
-        logger.info("[LLM] Inicializando modelo LLM: %s", app_config.OPENAI_MODEL)
-        _model = init_chat_model(
-            f"openai:{app_config.OPENAI_MODEL}",
-            api_key=app_config.OPENAI_API_KEY,
-            temperature=app_config.OPENAI_TEMPERATURE,
-            max_tokens=app_config.MAX_TOKENS,
-            timeout=app_config.OPENAI_TIMEOUT,
-        )
-    return _model
+    return init_chat_model(
+        f"openai:{app_config.OPENAI_MODEL}",
+        api_key=api_key,
+        temperature=app_config.OPENAI_TEMPERATURE,
+        max_tokens=app_config.MAX_TOKENS,
+        timeout=app_config.OPENAI_TIMEOUT,
+    )
 
 
 def get_checkpointer():
