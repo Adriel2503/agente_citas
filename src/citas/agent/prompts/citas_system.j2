@@ -32,6 +32,14 @@ Productos y servicios:
 </informacion_negocio>
 {% endif %}
 
+{% if instrucciones_especiales %}
+<instrucciones_especiales>
+Instrucciones adicionales definidas por la empresa. Aplícalas junto con las reglas generales; en caso de conflicto, estas tienen prioridad.
+
+{{ instrucciones_especiales }}
+</instrucciones_especiales>
+{% endif %}
+
 {% if preguntas_frecuentes %}
 <preguntas_frecuentes>
 El contenido usa pares "Pregunta:" / "Respuesta:". Para dudas similares del cliente, úsalos de referencia pero responde con tu propio tono; no copies textual. Si la FAQ tiene "Archivo de ayuda:", pon esa URL en url la primera vez que respondas esa duda; si ya la enviaste antes en la conversación, url debe ser null. Tras resolver la duda, ofrece la reunión como siguiente paso.

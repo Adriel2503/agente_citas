@@ -12,7 +12,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from ... import config as app_config
 from ...logger import get_logger
 from ...schemas import CitasConfig
-from ...services.prompt_data import fetch_contexto_negocio, fetch_horario_reuniones, fetch_nombres_productos_servicios, format_nombres_para_prompt, fetch_preguntas_frecuentes
+from ...services.prompt_data import fetch_contexto_negocio, fetch_funciones_especiales, fetch_horario_reuniones, fetch_nombres_productos_servicios, format_nombres_para_prompt, fetch_preguntas_frecuentes
 from ...services.scheduling.time_parser import DIAS_NOMBRE
 
 logger = get_logger(__name__)
@@ -75,6 +75,7 @@ async def build_citas_system_prompt(
         fetch_nombres_productos_servicios(id_empresa),
         fetch_contexto_negocio(id_empresa),
         fetch_preguntas_frecuentes(config.id_chatbot if config else None),
+        fetch_funciones_especiales(id_empresa),
         return_exceptions=True,
     )
 
@@ -86,12 +87,15 @@ async def build_citas_system_prompt(
         logger.warning("[PROMPT] contexto_negocio falló: %s - %s", type(results[2]).__name__, results[2])
     if isinstance(results[3], Exception):
         logger.warning("[PROMPT] preguntas_frecuentes falló: %s - %s", type(results[3]).__name__, results[3])
+    if isinstance(results[4], Exception):
+        logger.warning("[PROMPT] funciones_especiales falló: %s - %s", type(results[4]).__name__, results[4])
 
     horario_atencion = results[0] if not isinstance(results[0], Exception) else "No hay horario cargado."
     prods_servs = results[1] if not isinstance(results[1], Exception) else ([], [])
     nombres_productos, nombres_servicios = prods_servs
     contexto_negocio = results[2] if not isinstance(results[2], Exception) else None
     preguntas_frecuentes_str = results[3] if not isinstance(results[3], Exception) else ""
+    instrucciones_especiales = results[4] if not isinstance(results[4], Exception) else None
 
     variables["horario_atencion"] = horario_atencion
     variables["nombres_productos"] = nombres_productos
@@ -99,6 +103,7 @@ async def build_citas_system_prompt(
     variables["lista_productos_servicios"] = format_nombres_para_prompt(nombres_productos, nombres_servicios)
     variables["contexto_negocio"] = contexto_negocio
     variables["preguntas_frecuentes"] = preguntas_frecuentes_str or ""
+    variables["instrucciones_especiales"] = instrucciones_especiales
 
     return _citas_template.render(**variables)
 
