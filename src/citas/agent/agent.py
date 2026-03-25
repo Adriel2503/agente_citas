@@ -148,6 +148,8 @@ async def process_cita_message(
     if session_id is None or session_id < 0:
         raise ValueError("session_id es requerido (entero no negativo)")
 
+    config = config or CitasConfig()
+
     # Registrar request con label de baja cardinalidad (por empresa, no por sesión)
     _empresa_id = str(id_empresa)
     CHAT_REQUESTS.labels(empresa_id=_empresa_id).inc()
