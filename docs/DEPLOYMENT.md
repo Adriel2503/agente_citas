@@ -55,7 +55,7 @@ uv pip install .
 # Copiar plantilla
 cp .env.example .env
 
-# Editar con tus credenciales (minimo requerido: OPENAI_API_KEY)
+# Editar con tus configuraciones (api_key viene per-request desde el gateway)
 ```
 
 El servidor buscara el archivo `.env` hacia arriba en el arbol de directorios (hasta 6 niveles), por lo que puede estar en el directorio del proyecto o en un directorio padre.
@@ -106,19 +106,14 @@ Tools internas del agente:
 
 ### Minimas requeridas
 
-```bash
-OPENAI_API_KEY=sk-...
-```
-
-Todo lo demas tiene defaults funcionales. Ver `.env.example` para la plantilla completa.
+No hay variables obligatorias — la `api_key` de OpenAI se recibe per-request desde el gateway (`ChatRequest.api_key`). Todos los demas parametros tienen defaults funcionales. Ver `.env.example` para la plantilla completa.
 
 ### Referencia completa
 
 #### Development (`.env`)
 
 ```bash
-# ── LLM ────────────────────────────────────────────────────
-OPENAI_API_KEY=sk-...
+# ── LLM (api_key viene per-request desde el gateway) ──────
 OPENAI_MODEL=gpt-4o-mini
 OPENAI_TEMPERATURE=0.5
 OPENAI_TIMEOUT=60
@@ -171,8 +166,7 @@ LANGCHAIN_TRACING_V2=false
 #### Production (Easypanel / variables de entorno del servicio)
 
 ```bash
-# ── LLM ────────────────────────────────────────────────────
-OPENAI_API_KEY=sk-...
+# ── LLM (api_key viene per-request desde el gateway) ──────
 OPENAI_MODEL=gpt-4o-mini          # gpt-4o para mayor calidad
 OPENAI_TEMPERATURE=0.5
 OPENAI_TIMEOUT=60
@@ -399,8 +393,7 @@ El agente se despliega en **Easypanel** como un servicio Docker dentro del proye
 ### Variables criticas para Easypanel
 
 ```bash
-# Estas DEBEN configurarse en el servicio:
-OPENAI_API_KEY=sk-...
+# api_key viene per-request desde el gateway (ChatRequest.api_key)
 
 # Redis — hostname interno de Docker Compose en Easypanel
 REDIS_URL=redis://memori_agentes:6379
@@ -456,7 +449,6 @@ Respuesta degradada (HTTP 503):
 
 | Issue | Significado | Auto-recuperacion |
 |-------|-------------|-------------------|
-| `openai_api_key_missing` | `OPENAI_API_KEY` no configurada | No — requiere configurar la variable |
 | `informacion_api_degraded` | `ws_informacion_ia.php` acumulo 3+ fallos de red | Si — `CB_RESET_TTL` (default 5 min) |
 | `preguntas_api_degraded` | `ws_preguntas_frecuentes.php` acumulo 3+ fallos | Si — `CB_RESET_TTL` |
 | `calendario_api_degraded` | `ws_calendario.php` acumulo 3+ fallos | Si — `CB_RESET_TTL`. Impide crear citas |
@@ -640,27 +632,17 @@ curl -s http://localhost:8002/metrics | grep -E "llm_call|chat_response"
 
 ---
 
-### `OPENAI_API_KEY` invalida o expirada
+### `api_key` invalida o expirada
 
 **Sintoma:** El agente responde siempre con error generico, logs muestran `401` o `AuthenticationError`.
 
-```bash
-# Verificar que la key esta cargada (local)
-python -c "from citas.config import OPENAI_API_KEY; print(bool(OPENAI_API_KEY))"
-
-# En Docker
-docker exec agent-citas python -c "from citas.config import OPENAI_API_KEY; print(bool(OPENAI_API_KEY))"
-
-# Health check reporta el problema
-curl -s http://localhost:8002/health
-# → {"status": "degraded", "issues": ["openai_api_key_missing"]}
-```
+La `api_key` se recibe per-request desde el gateway (`ChatRequest.api_key`). Verificar que el gateway esta enviando una key valida. Los logs del agente registran el error con el `trace_id` del request.
 
 ---
 
 ### `/health` retorna 503 (degraded)
 
-**Causa:** Al menos un circuit breaker esta abierto o falta `OPENAI_API_KEY`.
+**Causa:** Al menos un circuit breaker esta abierto.
 
 ```bash
 # Ver que issues reporta
@@ -669,7 +651,6 @@ curl -s http://localhost:8002/health | python -m json.tool
 
 | Issue | Causa | Solucion |
 |-------|-------|----------|
-| `openai_api_key_missing` | `OPENAI_API_KEY` no configurada | Configurar en variables de entorno |
 | `informacion_api_degraded` | `ws_informacion_ia.php` con 3+ TransportErrors | Verificar conectividad a `api.maravia.pe`. Auto-reset en `CB_RESET_TTL` (5 min) |
 | `preguntas_api_degraded` | `ws_preguntas_frecuentes.php` con 3+ fallos | Igual que arriba |
 | `calendario_api_degraded` | `ws_calendario.php` con 3+ fallos | Igual que arriba. **Impacto:** no se pueden crear citas |

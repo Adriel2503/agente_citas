@@ -24,18 +24,18 @@ Este documento explica **que hace cada variable, cuando cambiarla y que pasa si 
 
 ## 1. OpenAI y LLM
 
-### `OPENAI_API_KEY`
+### `api_key` (per-request)
 
-**Requerida.** API key de OpenAI. Sin ella, el agente no puede generar respuestas. El endpoint `/health` reporta `openai_api_key_missing` si esta vacia.
+La API key de OpenAI se recibe en cada request (`ChatRequest.api_key`) desde el gateway. No se configura como variable de entorno.
 
 ### `OPENAI_MODEL`
 
 - **Default:** `gpt-4o-mini`
 - **Rango:** cualquier modelo de OpenAI
 
-El modelo de lenguaje que usa el agente. Se crea **una sola vez** como singleton — todas las empresas comparten el mismo modelo.
+El modelo de lenguaje que usa el agente. Se crea por tenant (cache key = `id_empresa` + hash de `api_key`).
 
-**Cuando cambiarlo:** Si quieres usar un modelo mas capaz (`gpt-4o`) o mas barato (`gpt-4o-mini`). El cambio aplica a todas las empresas; no hay modelo por empresa.
+**Cuando cambiarlo:** Si quieres usar un modelo mas capaz (`gpt-4o`) o mas barato (`gpt-4o-mini`).
 
 **Ejemplo:** El agente falla en conversaciones complejas con muchos datos de productos:
 ```
@@ -483,7 +483,7 @@ Mismo concepto pero para los locks de **creacion de agentes** (uno por empresa).
 Los defaults funcionan bien. Solo necesitas configurar lo esencial:
 
 ```env
-OPENAI_API_KEY=sk-...
+# api_key viene per-request desde el gateway
 OPENAI_MODEL=gpt-4o-mini
 LOG_LEVEL=INFO
 ```
@@ -491,7 +491,7 @@ LOG_LEVEL=INFO
 ### Escenario 2: Muchas empresas (200+), trafico alto
 
 ```env
-OPENAI_API_KEY=sk-...
+# api_key viene per-request desde el gateway
 OPENAI_MODEL=gpt-4o-mini
 
 # Mas espacio para agentes y conexiones
@@ -507,7 +507,7 @@ CB_MAX_KEYS=1000
 ### Escenario 3: APIs de MaravIA inestables
 
 ```env
-OPENAI_API_KEY=sk-...
+# api_key viene per-request desde el gateway
 
 # Mas reintentos y mas tiempo de espera
 HTTP_RETRY_ATTEMPTS=5
@@ -521,7 +521,6 @@ CB_RESET_TTL=120
 ### Escenario 4: Debugging de un problema
 
 ```env
-OPENAI_API_KEY=sk-...
 LOG_LEVEL=DEBUG
 LOG_FILE=/tmp/agent_citas_debug.log
 ```

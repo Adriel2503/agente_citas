@@ -216,6 +216,6 @@ Responde de forma amable y profesional.
 1. **`tools/tools.py`** → Ajustar `AGENT_TOOLS` (vacío, parcial, o nuevas tools)
 2. **`prompts/__init__.py`** → Eliminar/comentar fetches no necesarios (líneas 72-101)
 3. **`prompts/citas_system.j2`** → Reemplazar con tu prompt personalizado
-4. **`.env`** → Configurar `OPENAI_API_KEY`, `OPENAI_MODEL`, quitar `REDIS_URL` si no usas Redis
+4. **`.env`** → Configurar `OPENAI_MODEL`, quitar `REDIS_URL` si no usas Redis (api_key viene per-request)
 
 Todo lo demás (`agent.py`, `runtime/`, `config/`, `infra/`) queda igual — no tocar.

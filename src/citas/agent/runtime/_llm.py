@@ -1,7 +1,7 @@
 """
-Singleton LLM y checkpointer LangGraph para el agente de citas.
+LLM per-tenant y checkpointer LangGraph para el agente de citas.
 
-Inicialización lazy del modelo (get_model) igual que get_client en http_client.py.
+get_model(api_key) crea un modelo por tenant (se llama solo en cache miss del agente).
 El checkpointer se crea en init_checkpointer() (async, llamado desde lifespan).
 """
 
@@ -23,7 +23,6 @@ logger = get_logger(__name__)
 # ---------------------------------------------------------------------------
 
 _checkpointer: Any = None
-
 
 
 def _make_memory_saver() -> InMemorySaver:

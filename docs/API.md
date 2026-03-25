@@ -184,7 +184,7 @@ GET /health
   "status": "degraded",
   "agent": "citas",
   "version": "2.5.0",
-  "issues": ["openai_api_key_missing", "calendario_api_degraded"]
+  "issues": ["calendario_api_degraded"]
 }
 ```
 
@@ -199,7 +199,6 @@ GET /health
 
 | Issue | Causa | Impacto |
 |-------|-------|---------|
-| `openai_api_key_missing` | `OPENAI_API_KEY` no configurada | El agente no puede procesar mensajes |
 | `informacion_api_degraded` | CB de `ws_informacion_ia.php` abierto | No se puede cargar horarios, contexto ni productos |
 | `preguntas_api_degraded` | CB de `ws_preguntas_frecuentes.php` abierto | No se cargan FAQs al prompt |
 | `calendario_api_degraded` | CB de `ws_calendario.php` abierto | No se pueden crear eventos/citas |
@@ -480,7 +479,7 @@ El agente siempre responde con HTTP 200. Los errores se comunican en texto dentr
 
 ### Error: Fallo al crear agente
 
-**Causa:** Error al inicializar el modelo LLM o construir el system prompt (ej. `OPENAI_API_KEY` inválida).
+**Causa:** Error al inicializar el modelo LLM o construir el system prompt (ej. `api_key` inválida en el request).
 
 **Response:**
 ```json
@@ -1232,8 +1231,7 @@ Cuando el cache del agente expira (cada 60 min), el primer request de esa empres
 
 | Variable | Default | Descripción |
 |----------|---------|-------------|
-| `OPENAI_API_KEY` | `""` | API key de OpenAI (requerida) |
-| `OPENAI_MODEL` | `"gpt-4o-mini"` | Modelo a usar |
+| `OPENAI_MODEL` | `"gpt-4o-mini"` | Modelo a usar (api_key viene per-request en ChatRequest) |
 | `OPENAI_TEMPERATURE` | `0.5` | Temperatura (0.0–2.0) |
 
 ### Servidor

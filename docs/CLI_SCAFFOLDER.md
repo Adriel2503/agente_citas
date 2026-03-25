@@ -51,7 +51,7 @@ $ maravia new agent_automotriz
 
   Próximos pasos:
     cd agent_automotriz
-    cp .env.example .env        # configurar OPENAI_API_KEY
+    cp .env.example .env        # configurar OPENAI_MODEL y otras opciones
     uv sync
     uv run python -m agent_automotriz
 ```
@@ -260,7 +260,7 @@ AGENT_TOOLS = [
 ### .env.example.jinja
 
 ```env
-OPENAI_API_KEY=<REEMPLAZAR>
+# api_key viene per-request desde el gateway (ChatRequest.api_key)
 OPENAI_MODEL={{ openai_model }}
 SERVER_PORT={{ server_port }}
 TIMEZONE={{ timezone }}
@@ -318,7 +318,7 @@ Genera:
 ```
 agent_automotriz/
 ├── pyproject.toml              # name="agent_automotriz", deps sin redis
-├── .env.example                # OPENAI_API_KEY, SERVER_PORT=8002
+├── .env.example                # OPENAI_MODEL, SERVER_PORT=8002
 ├── src/
 │   └── agent_automotriz/
 │       ├── __init__.py
@@ -351,7 +351,7 @@ agent_automotriz/
 ```
 
 El usuario solo necesita:
-1. `cp .env.example .env` y poner su `OPENAI_API_KEY`
+1. `cp .env.example .env` y ajustar `OPENAI_MODEL` y otras opciones
 2. Editar `system.j2` con su prompt personalizado
 3. `uv sync && uv run python -m agent_automotriz`
 

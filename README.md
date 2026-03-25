@@ -62,13 +62,13 @@ El agente **no** modifica ni cancela citas (operación no implementada). No gest
 │                        GATEWAY Go (puerto 8080)                     │
 │  Recibe JSON de N8N, enruta por modalidad="citas" → POST /api/chat  │
 └───────────────────────────────┬─────────────────────────────────────┘
-                                │ {message, session_id, context.config}
+                                │ {message, session_id, id_empresa, api_key, config}
                                 ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │                    FastAPI — main.py (puerto 8002)                  │
 │                                                                     │
 │  POST /api/chat ──► asyncio.wait_for(process_cita_message, 120s)    │
-│  GET  /health   ──► verifica API key + estado de circuit breakers   │
+│  GET  /health   ──► verifica estado de circuit breakers             │
 │  GET  /metrics  ──► Prometheus exposition format                    │
 └───────────────────────────────┬─────────────────────────────────────┘
                                 │
@@ -78,12 +78,14 @@ El agente **no** modifica ni cancela citas (operación no implementada). No gest
 │                                                                     │
 │  1. Session lock (asyncio.Lock por session_id)                      │
 │  2. Validate context → config_data (setdefault personalidad)        │
-│  3. _get_agent(config) ← TTLCache por id_empresa                    │
+│  3. _get_agent(id_empresa, api_key, config) ← TTLCache              │
+│     └─ cache key: (id_empresa, sha256(api_key)[:12])                │
 │     └─ si miss: build_citas_system_prompt() [asyncio.gather x4]     │
 │  4. agent.ainvoke(messages, thread_id=session_id, context=ctx)      │
 └────────┬───────────────────────────────────────────┬────────────────┘
-         │ InMemorySaver (LangGraph checkpointer)    │ AgentContext
-         │ thread_id = str(session_id)               │ (inyectado a tools)
+         │ Checkpointer (AsyncRedisSaver / fallback   │ AgentContext
+         │   InMemorySaver) thread_id=session_id     │
+         │                                           │ (inyectado a tools)
          ▼                                           ▼
 ┌─────────────────────┐          ┌────────────────────────────────────┐
 │   LLM gpt-4o-mini   │          │           TOOLS (function calling) │
@@ -129,49 +131,49 @@ APIs externas (httpx async, retries, circuit breaker):
 {
   "message": "Quiero agendar para el viernes a las 3pm",
   "session_id": 5191234567890,
-  "context": {
-    "config": {
-      "id_empresa": 42,
-      "usuario_id": 7,
-      "correo_usuario": "vendedor@empresa.com",
-      "personalidad": "amable y directa",
-      "duracion_cita_minutos": 60,
-      "slots": 60,
-      "agendar_usuario": 1,
-      "agendar_sucursal": 0
-    }
+  "id_empresa": 42,
+  "api_key": "sk-...",
+  "config": {
+    "usuario_id": 7,
+    "correo_usuario": "vendedor@empresa.com",
+    "personalidad": "amable y directa",
+    "duracion_cita_minutos": 60,
+    "slots": 60,
+    "agendar_usuario": 1,
+    "agendar_sucursal": 0
   }
 }
 ```
 
-El `session_id` es el número de WhatsApp del prospecto (`5191234567890`), único y permanente por contacto.
+`session_id` es el número de WhatsApp del prospecto (`5191234567890`), único y permanente por contacto. `id_empresa` y `api_key` son top-level (el gateway siempre los envía). `config` es opcional (CitasConfig con Pydantic, `extra="ignore"`).
 
-### Paso 2 — Validación y preparación de contexto
+### Paso 2 — Preparación de contexto
 
 ```
-FastAPI → process_cita_message()
-  ├─ Valida que context.config contenga id_empresa (requerido)
-  ├─ Aplica default de personalidad en config_data (setdefault) y construye AgentContext
-  └─ AgentContext (dataclass) se inyecta a las tools:
-       id_empresa, usuario_id, correo_usuario, id_prospecto=session_id,
+FastAPI → process_cita_message(message, session_id, id_empresa, api_key, config)
+  ├─ id_empresa y api_key validados por Pydantic en ChatRequest (requeridos)
+  ├─ config: CitasConfig con validators (bool→int, strip, defaults)
+  └─ _prepare_agent_context() construye AgentContext (dataclass) inyectado a tools:
+       id_empresa, usuario_id, correo_usuario, session_id,
        duracion_cita_minutos, slots, agendar_usuario, agendar_sucursal
 ```
 
 ### Paso 3 — Session lock
 
-Antes de tocar el checkpointer (InMemorySaver), se adquiere un `asyncio.Lock` keyed por `session_id`. Esto garantiza que si el mismo usuario envía dos mensajes en rápida sucesión (doble-clic, reintento), el segundo espera a que termine el primero. Evita condiciones de carrera sobre el mismo `thread_id` en LangGraph.
+Antes de tocar el checkpointer, se adquiere un `asyncio.Lock` keyed por `session_id`. Esto garantiza que si el mismo usuario envía dos mensajes en rápida sucesión (doble-clic, reintento), el segundo espera a que termine el primero. Evita condiciones de carrera sobre el mismo `thread_id` en LangGraph.
 
 ### Paso 4 — Obtención del agente compilado (TTLCache)
 
 ```python
-cache_key = (id_empresa,)
-agent = _agent_cache[cache_key]  # O lo crea si no existe
+key_hash = sha256(api_key)[:12]
+cache_key = (id_empresa, key_hash)
+agent = get_cached_agent(cache_key)  # O lo crea si no existe
 ```
 
-Si es un **cache miss** (primera request de esa empresa, o TTL expirado):
-1. Se adquiere otro lock por `cache_key` (para evitar thundering herd entre múltiples sesiones de la misma empresa que llegan simultáneamente).
+Si es un **cache miss** (primera request de esa empresa, TTL expirado, o cambio de api_key):
+1. Se adquiere un lock por `cache_key` (para evitar thundering herd entre múltiples sesiones de la misma empresa que llegan simultáneamente).
 2. Se llama `build_citas_system_prompt()` que hace **4 llamadas HTTP en paralelo** (ver §7).
-3. Se inicializa el modelo LLM con `init_chat_model()`.
+3. Se crea el modelo LLM per-tenant con `get_model(api_key)` → `init_chat_model()`.
 4. Se compila el grafo LangGraph con `create_agent()`.
 5. Se guarda en `_agent_cache` con TTL de `AGENT_CACHE_TTL_MINUTES` (default 60 min).
 
@@ -206,12 +208,12 @@ La respuesta se retorna como `{"reply": "...", "url": null}` al gateway Go.
 
 ```python
 agent = create_agent(
-    model=model,                          # init_chat_model("openai:gpt-4o-mini")
+    model=get_model(api_key),             # init_chat_model("openai:gpt-4o-mini", api_key=...)
     tools=AGENT_TOOLS,                    # [check_availability, create_booking, search_...]
     system_prompt=system_prompt,          # Template Jinja2 renderizado
-    checkpointer=_checkpointer,           # InMemorySaver (→ AsyncRedisSaver en roadmap)
+    checkpointer=get_checkpointer(),      # AsyncRedisSaver (con TTL) / fallback InMemorySaver
     response_format=CitaStructuredResponse,  # Structured output: reply + url
-    middleware=[_message_window],         # Ventana de mensajes (trim_messages, no destructivo)
+    middleware=[message_window],          # Ventana de mensajes (trim_messages, no destructivo)
 )
 ```
 
@@ -221,7 +223,7 @@ LangGraph usa `thread_id = str(session_id)` como identificador de conversación.
 
 **Ventana de mensajes:** El middleware `_message_window` (vía `wrap_model_call` + `trim_messages`) limita a `MAX_MESSAGES_HISTORY` (default 20) los mensajes que ve el LLM en cada llamada. El checkpointer conserva el historial completo — solo se recorta lo que se envía al modelo.
 
-**Limitación actual:** `InMemorySaver` no tiene TTL. Las conversaciones crecen indefinidamente en RAM. Ver §18.
+**Checkpointer:** El agente soporta `AsyncRedisSaver` (con TTL configurable vía `REDIS_CHECKPOINT_TTL_HOURS`, default 24h) con fallback automático a `InMemorySaver` si Redis no está disponible. La inicialización ocurre en `init_checkpointer()` durante el lifespan de FastAPI.
 
 ### Runtime context injection (LangChain 1.2+ ToolRuntime)
 
@@ -251,12 +253,12 @@ Si el mensaje del usuario contiene URLs de imágenes (`.jpg`, `.jpeg`, `.png`, `
 
 Las tools son el puente entre el LLM y los sistemas externos. El LLM decide autónomamente cuándo y cuáles invocar basándose en el estado de la conversación.
 
-Definidas en `tool/tools.py`. Exportadas como `AGENT_TOOLS = [check_availability, create_booking, search_productos_servicios]`.
+Definidas en `tools/tools.py`. Exportadas como `AGENT_TOOLS = [check_availability, create_booking, search_productos_servicios]`.
 
 ### Tabla resumen: origen de cada parámetro
 
 > **🤖 IA** = el LLM decide el valor basándose en la conversación.
-> **🔧 Gateway** = viene de `context.config` enviado por el gateway Go (originado en N8N).
+> **🔧 Gateway** = viene de `config` (CitasConfig) enviado por el gateway Go (originado en N8N).
 > **⚙️ Runtime** = inyectado automáticamente por LangChain vía `ToolRuntime` (el LLM no lo ve).
 
 | Tool | Parámetro | Tipo | Origen | Ejemplo |
@@ -277,15 +279,14 @@ Definidas en `tool/tools.py`. Exportadas como `AGENT_TOOLS = [check_availability
 ```python
 @dataclass
 class AgentContext:
-    id_empresa: int              # 🔧 Gateway (requerido)
-    duracion_cita_minutos: int   # 🔧 Gateway (default: 60)
-    slots: int                   # 🔧 Gateway (default: 60)
-    agendar_usuario: int         # 🔧 Gateway (default: 1) — 1=asignar vendedor
-    usuario_id: int              # 🔧 Gateway (default: 1) — ID del vendedor
-    correo_usuario: str          # 🔧 Gateway (default: "") — email del vendedor
-    agendar_sucursal: int        # 🔧 Gateway (default: 0)
-    id_prospecto: int            # = session_id (número WhatsApp)
-    session_id: int              # = session_id del request
+    id_empresa: int                        # 🔧 Gateway (requerido)
+    duracion_cita_minutos: int | None = None  # 🔧 Gateway (None si no enviado)
+    slots: int | None = None               # 🔧 Gateway (None si no enviado)
+    agendar_usuario: int = 1               # 🔧 Gateway (default: 1) — 1=asignar vendedor
+    usuario_id: int | None = None          # 🔧 Gateway (None si no enviado) — ID del vendedor
+    correo_usuario: str | None = None      # 🔧 Gateway (None si no enviado) — email del vendedor
+    agendar_sucursal: int = 0              # 🔧 Gateway (default: 0)
+    session_id: int = 0                    # = session_id del request (número WhatsApp)
 ```
 
 Cada tool accede al contexto así:
@@ -395,11 +396,11 @@ Si NO viene time (solo fecha o pregunta general):
 
 | Parámetro del contexto | Campo en payload CREAR_EVENTO | Cómo llega |
 |------------------------|-------------------------------|------------|
-| `usuario_id` | `usuario_id` | `context.config.usuario_id` del gateway |
+| `usuario_id` | `usuario_id` | `config.usuario_id` del gateway |
 | `session_id` | `id_prospecto` | `session_id` del request (nro WhatsApp) |
-| `correo_usuario` | `correo_usuario` | `context.config.correo_usuario` del gateway |
-| `agendar_usuario` | `agendar_usuario` | `context.config.agendar_usuario` del gateway |
-| `duracion_cita_minutos` | Cálculo de `fecha_fin` | `context.config.duracion_cita_minutos` del gateway |
+| `correo_usuario` | `correo_usuario` | `config.correo_usuario` del gateway |
+| `agendar_usuario` | `agendar_usuario` | `config.agendar_usuario` del gateway |
+| `duracion_cita_minutos` | Cálculo de `fecha_fin` | `config.duracion_cita_minutos` del gateway |
 
 **Parámetros calculados por el código (ni IA ni gateway):**
 
@@ -413,7 +414,7 @@ Si NO viene time (solo fecha o pregunta general):
 **Pipeline de 3 fases:**
 
 ```
-Fase 1 — Validación de datos (Pydantic + regex en tool/validation.py)
+Fase 1 — Validación de datos (Pydantic + regex en tools/validation.py)
   ├─ date: formato YYYY-MM-DD, no en el pasado
   ├─ time: HH:MM AM/PM o HH:MM 24h
   ├─ customer_name: ≥2 chars, sin números, solo letras/espacios/acentos
@@ -608,7 +609,7 @@ El agente usa **2 caches TTL** independientes. Horarios, contexto de negocio y F
 
 | Caché | Módulo | Clave | Maxsize | TTL | Propósito |
 |-------|--------|-------|---------|-----|-----------|
-| `_agent_cache` | `agent/agent.py` | `(id_empresa,)` | 500 | `AGENT_CACHE_TTL_MINUTES` (60 min) | Agente compilado (grafo LangGraph + system prompt con horarios, contexto, FAQs) |
+| `_agent_cache` | `agent/runtime/_cache.py` | `(id_empresa, key_hash)` | 500 | `AGENT_CACHE_TTL_MINUTES` (60 min) | Agente compilado (grafo LangGraph + system prompt con horarios, contexto, FAQs) |
 | `_busqueda_cache` | `busqueda_productos.py` | `(id_empresa, busqueda)` | 2000 | `SEARCH_CACHE_TTL_MINUTES` (15 min) | Resultados de búsqueda de productos/servicios |
 
 ### Por qué el ScheduleValidator no usa el cache del agente
@@ -722,20 +723,25 @@ Las 4 fuentes de datos del system prompt se cargan en paralelo con `asyncio.gath
 
 | Métrica | Tipo | Labels | Descripción |
 |---------|------|--------|-------------|
-| `agent_citas_chat_requests_total` | Counter | `empresa_id` | Mensajes recibidos (label de baja cardinalidad: empresa, no sesión) |
-| `agent_citas_chat_errors_total` | Counter | `error_type` | Errores por tipo (`context_error`, `agent_creation_error`, etc.) |
-| `agent_citas_booking_attempts_total` | Counter | — | Intentos de llamar a `create_booking` |
-| `agent_citas_booking_success_total` | Counter | — | Citas creadas exitosamente |
-| `agent_citas_booking_failed_total` | Counter | `reason` | Fallos (`invalid_datetime`, `circuit_open`, `timeout`, `http_4xx`, etc.) |
-| `agent_citas_tool_calls_total` | Counter | `tool_name` | Llamadas a cada tool |
-| `agent_citas_tool_errors_total` | Counter | `tool_name`, `error_type` | Errores por tool |
-| `agent_citas_api_calls_total` | Counter | `endpoint`, `status` | Llamadas a APIs externas |
-| `agent_citas_chat_response_duration_seconds` | Histogram | `status` | Latencia total request→response (buckets: 0.1s–90s) |
-| `agent_citas_llm_call_duration_seconds` | Histogram | `status` | Latencia llamada al LLM (buckets: 0.5s–90s) |
-| `agent_citas_tool_execution_duration_seconds` | Histogram | `tool_name` | Latencia de cada tool (buckets: 0.1s–10s) |
-| `agent_citas_api_call_duration_seconds` | Histogram | `endpoint` | Latencia de APIs externas (buckets: 0.1s–10s) |
-| `agent_citas_cache_entries` | Gauge | `cache_type` | Entradas actuales por tipo de cache |
-| `agent_citas_info` | Info | — | Versión, modelo, tipo de agente |
+| `citas_chat_requests_total` | Counter | `empresa_id` | Mensajes recibidos (label de baja cardinalidad: empresa, no sesión) |
+| `citas_chat_errors_total` | Counter | `error_type` | Errores por tipo (`agent_creation_error`, `openai_auth_error`, etc.) |
+| `citas_http_requests_total` | Counter | `status` | Requests al endpoint /api/chat (`success`, `timeout`, `error`) |
+| `citas_booking_attempts_total` | Counter | — | Intentos de llamar a `create_booking` |
+| `citas_booking_success_total` | Counter | — | Citas creadas exitosamente |
+| `citas_booking_failed_total` | Counter | `reason` | Fallos (`invalid_datetime`, `circuit_open`, `timeout`, `http_4xx`, etc.) |
+| `citas_tool_calls_total` | Counter | `tool_name` | Llamadas a cada tool |
+| `citas_tool_errors_total` | Counter | `tool_name`, `error_type` | Errores por tool |
+| `citas_api_calls_total` | Counter | `endpoint`, `status` | Llamadas a APIs externas |
+| `citas_agent_cache_total` | Counter | `result` | Hits y misses del cache de agente (`hit`, `miss`) |
+| `citas_search_cache_total` | Counter | `result` | Hits y misses del cache de búsqueda (`hit`, `miss`, `circuit_open`) |
+| `citas_availability_degradation_total` | Counter | `service`, `reason` | Degradaciones de validación (B2 — riesgo double booking) |
+| `citas_http_duration_seconds` | Histogram | — | Latencia total del endpoint /api/chat (buckets: 0.25s–120s) |
+| `citas_chat_response_duration_seconds` | Histogram | `status` | Latencia interna del process_cita_message (buckets: 0.1s–90s) |
+| `citas_llm_call_duration_seconds` | Histogram | `status` | Latencia llamada al LLM (buckets: 0.5s–90s) |
+| `citas_tool_execution_duration_seconds` | Histogram | `tool_name` | Latencia de cada tool (buckets: 0.1s–30s) |
+| `citas_api_call_duration_seconds` | Histogram | `endpoint` | Latencia de APIs externas (buckets: 0.1s–10s) |
+| `citas_cache_entries` | Gauge | `cache_type` | Entradas actuales por tipo de cache |
+| `citas_info` | Info | — | Versión, modelo, tipo de agente |
 
 ### Logging
 
@@ -751,7 +757,7 @@ Niveles de logs relevantes:
 |---------|--------|---------|
 | `[HTTP]` | `main.py` | Request recibido, respuesta generada, timeouts |
 | `[AGENT]` | `agent/agent.py` | Cache hit/miss, creación de agente, invocación |
-| `[TOOL]` | `tool/tools.py` | Tool invocada, validaciones, resultados |
+| `[TOOL]` | `tools/tools.py` | Tool invocada, validaciones, resultados |
 | `[BOOKING]` | `scheduling/booking.py` | Evento creado, errores de calendario |
 | `[SCHEDULE]` | `scheduling/schedule_validator.py` | Validaciones de horario |
 | `[RECOMMENDATION]` | `scheduling/schedule_recommender.py` | Sugerencias de horarios |
@@ -770,19 +776,21 @@ Procesa un mensaje del cliente y devuelve la respuesta del agente.
 ```json
 {
   "message": "string (1–4096 chars, requerido)",
-  "session_id": "integer (≥0, requerido)",
-  "context": {
-    "config": {
-      "id_empresa": "integer (requerido)",
-      "usuario_id": "integer (opcional, default: None — requerido para crear cita)",
-      "correo_usuario": "string (opcional, default: None — requerido para crear cita)",
-      "personalidad": "string (opcional, default: 'amable, profesional y eficiente')",
-      "duracion_cita_minutos": "integer (opcional, default: 60)",
-      "slots": "integer (opcional, default: 60)",
-      "agendar_usuario": "bool|int (opcional, default: 1)",
-      "agendar_sucursal": "bool|int (opcional, default: 0)",
-      "id_chatbot": "integer (opcional, para FAQs)"
-    }
+  "session_id": "integer (requerido)",
+  "id_empresa": "integer (requerido)",
+  "api_key": "string (requerido — OpenAI API key del tenant)",
+  "config": {
+    "usuario_id": "integer (opcional, default: None — requerido para crear cita)",
+    "correo_usuario": "string (opcional, default: None — requerido para crear cita)",
+    "personalidad": "string (opcional, default: 'amable, profesional y eficiente')",
+    "duracion_cita_minutos": "integer (opcional, default: None)",
+    "slots": "integer (opcional, default: None)",
+    "agendar_usuario": "bool|int (opcional, default: 1)",
+    "agendar_sucursal": "bool|int (opcional, default: 0)",
+    "id_chatbot": "integer (opcional, para FAQs)",
+    "nombre_bot": "string (opcional)",
+    "frase_saludo": "string (opcional)",
+    "archivo_saludo": "string (opcional, URL de saludo)"
   }
 }
 ```
@@ -830,7 +838,6 @@ Verifica el estado del servicio y sus dependencias.
 ```
 
 Issues posibles:
-- `openai_api_key_missing` — `OPENAI_API_KEY` no está configurada
 - `informacion_api_degraded` — circuit breaker de `ws_informacion_ia` abierto
 - `preguntas_api_degraded` — circuit breaker de `ws_preguntas_frecuentes` abierto
 - `calendario_api_degraded` — circuit breaker de `ws_calendario` abierto
@@ -850,8 +857,7 @@ Métricas Prometheus en formato text/plain. Diseñado para ser scrapeado por Pro
 
 | Variable | Requerida | Default | Validación | Descripción |
 |----------|-----------|---------|-----------|-------------|
-| `OPENAI_API_KEY` | ✅ | — | — | API Key de OpenAI |
-| `OPENAI_MODEL` | ❌ | `gpt-4o-mini` | string | Modelo de OpenAI |
+| `OPENAI_MODEL` | ❌ | `gpt-4o-mini` | string | Modelo de OpenAI (api_key viene per-request en ChatRequest) |
 | `OPENAI_TEMPERATURE` | ❌ | `0.5` | 0.0–2.0 | Temperatura del LLM |
 | `OPENAI_TIMEOUT` | ❌ | `60` | 1–300 seg | Timeout para llamadas al LLM |
 | `MAX_TOKENS` | ❌ | `2048` | 1–128000 | Máximo de tokens por respuesta |
@@ -875,7 +881,9 @@ Métricas Prometheus en formato text/plain. Diseñado para ser scrapeado por Pro
 | `LOG_LEVEL` | ❌ | `INFO` | DEBUG/INFO/WARNING/ERROR/CRITICAL | Nivel de logging |
 | `LOG_FILE` | ❌ | `""` | path | Archivo de log (vacío = solo stdout) |
 | `TIMEZONE` | ❌ | `America/Lima` | zoneinfo key | Zona horaria para fechas en prompts y validaciones |
-| `REDIS_URL` | ❌ | `""` | URL redis:// | URL de Redis (pendiente de integración) |
+| `REDIS_URL` | ❌ | `""` | URL redis:// | URL de Redis para AsyncRedisSaver (vacío = InMemorySaver) |
+| `REDIS_CHECKPOINT_TTL_HOURS` | ❌ | `24` | 0–8760 h | TTL de sesiones en Redis (0 = sin TTL) |
+| `MAX_CONCURRENT_AGENT` | ❌ | `50` | 5–500 | Máximo de invocaciones concurrentes al agente (backpressure) |
 | `API_CALENDAR_URL` | ❌ | `https://api.maravia.pe/.../ws_calendario.php` | URL | Endpoint para CREAR_EVENTO |
 | `API_AGENDAR_REUNION_URL` | ❌ | `https://api.maravia.pe/.../ws_agendar_reunion.php` | URL | Endpoint para SUGERIR_HORARIOS y CONSULTAR_DISPONIBILIDAD |
 | `API_INFORMACION_URL` | ❌ | `https://api.maravia.pe/.../ws_informacion_ia.php` | URL | Endpoint para horarios, contexto, productos |
@@ -1180,15 +1188,20 @@ agent_citas/
 │   ├── __init__.py
 │   │
 │   ├── agent/                         # Orquestación del agente LangGraph
-│   │   ├── agent.py                   # Core: TTLCache, session locks, middleware ventana, process_cita_message()
+│   │   ├── agent.py                   # Core: _get_agent(), process_cita_message(), _OPENAI_ERRORS
 │   │   ├── content.py                 # CitaStructuredResponse (Pydantic) + _build_content (multimodal)
-│   │   ├── context.py                 # AgentContext (dataclass) + _validate_context + _prepare_agent_context
+│   │   ├── context.py                 # AgentContext (dataclass) + _prepare_agent_context
 │   │   ├── __init__.py
+│   │   ├── runtime/                   # Runtime del agente — NO TOCAR entre agentes
+│   │   │   ├── __init__.py            # Re-exports de _cache, _llm, middleware
+│   │   │   ├── _cache.py             # TTLCache + asyncio locks + cleanup
+│   │   │   ├── _llm.py              # get_model(api_key) + get_checkpointer() + init/close_checkpointer()
+│   │   │   └── middleware.py          # @wrap_model_call message_window (trim_messages)
 │   │   └── prompts/                   # System prompt del agente
 │   │       ├── __init__.py            # build_citas_system_prompt() — asyncio.gather x4 + Jinja2
 │   │       └── citas_system.j2        # Template del system prompt
 │   │
-│   ├── tool/                          # Tools del agente (@tool LangChain)
+│   ├── tools/                         # Tools del agente (@tool LangChain)
 │   │   ├── tools.py                   # check_availability, create_booking, search_productos_servicios
 │   │   ├── validation.py              # Validadores Pydantic + regex para datos de booking
 │   │   └── __init__.py
@@ -1220,7 +1233,8 @@ agent_citas/
 │   │
 │   └── config/
 │       ├── config.py                  # Variables de entorno con validación de tipos
-│       └── __init__.py
+│       ├── circuit_breakers.py        # 4 CB singletons + get_health_issues() para /health
+│       └── __init__.py                # Re-exports de config + circuit_breakers
 │
 ├── pyproject.toml                     # hatchling build, deps pinneadas
 ├── Dockerfile                         # python:3.12-slim + uv
@@ -1240,7 +1254,7 @@ config/config.py                          (nivel 0 — sin dependencias internas
    ├── metrics.py                          (nivel 1)
    └── config/__init__.py                  (nivel 1 — re-exporta variables)
             ↑
-            ├── tool/validation.py                        (nivel 2)
+            ├── tools/validation.py                       (nivel 2)
             ├── infra/http_client.py                      (nivel 2 — tenacity retry)
             ├── infra/circuit_breaker.py                   (nivel 2 — 4 CB singletons)
             │       ↑
@@ -1259,9 +1273,10 @@ config/config.py                          (nivel 0 — sin dependencias internas
             │                           (nivel 3)              │
             └──────────────────────────────────────────────────┘
                             ↑
-                    tool/tools.py            (nivel 4)
+                    tools/tools.py           (nivel 4)
                             ↑
                     agent/prompts/           (nivel 4, paralelo)
+                    agent/runtime/           (nivel 4, _cache + _llm + middleware)
                             ↑
                     agent/agent.py           (nivel 5)
                             ↑
@@ -1274,15 +1289,16 @@ config/config.py                          (nivel 0 — sin dependencias internas
 
 | Patrón | Dónde | Propósito |
 |--------|-------|-----------|
-| **Factory + Cache** | `agent/agent.py` (`_get_agent`) | Agente compilado por empresa, evita recreación |
+| **Factory + Cache** | `agent/agent.py` (`_get_agent`) | Agente compilado por (empresa, api_key), evita recreación |
 | **Double-Checked Locking** | `agent/agent.py`, `busqueda_productos.py` | Serializar primera creación sin bloquear hot path |
-| **Singleton** | `infra/http_client.py`, `agent/agent.py` (`_model`) | Connection pool y modelo LLM compartidos |
+| **Singleton** | `infra/http_client.py`, `agent/runtime/_llm.py` (`_checkpointer`) | Connection pool y checkpointer compartidos |
+| **Per-tenant Factory** | `agent/runtime/_llm.py` (`get_model`) | Modelo LLM por tenant (api_key), creado solo en cache miss |
 | **Circuit Breaker** | `infra/circuit_breaker.py` (4 CBs) | Protege ante APIs inestables, auto-reset por TTL |
 | **Resilient Call** | `infra/_resilience.py` | Wrapper: CB check → execute → record success/failure |
 | **Retry + Backoff** | `infra/http_client.py` (tenacity) | Configurable: intentos, espera min/max |
-| **Runtime Context Injection** | `tool/tools.py` (LangChain 1.2+) | AgentContext inyectado en tools sin parámetros explícitos |
-| **Graceful Degradation** | `scheduling/schedule_validator.py`, `tool/tools.py` | Si falla API no crítica, continúa con fallback |
-| **Strategy** (validación) | `tool/tools.py` (`create_booking`) | 3 capas secuenciales independientes |
+| **Runtime Context Injection** | `tools/tools.py` (LangChain 1.2+) | AgentContext inyectado en tools sin parámetros explícitos |
+| **Graceful Degradation** | `scheduling/schedule_validator.py`, `tools/tools.py` | Si falla API no crítica, continúa con fallback |
+| **Strategy** (validación) | `tools/tools.py` (`create_booking`) | 3 capas secuenciales independientes |
 | **Observer** | `metrics.py` | Context managers trackean sin modificar lógica de negocio |
 | **Template Method** | `agent/prompts/citas_system.j2` | Estructura del prompt fija, variables inyectadas |
 
@@ -1298,7 +1314,7 @@ Todas las dependencias están pinneadas en [`pyproject.toml`](pyproject.toml) co
 | Validación | `pydantic` v2 | 2.12.5 | Modelos de request/response y datos de booking |
 | LLM agent | `langchain` + `langchain-core` | 1.2.10 / 1.2.17 | `create_agent`, `@tool`, `ToolRuntime`, `trim_messages`, `wrap_model_call` |
 | LLM provider | `langchain-openai` | 1.1.10 | `init_chat_model("openai:gpt-4o-mini")` |
-| Grafos de agente | `langgraph` + `langgraph-checkpoint` | 1.0.10 / 4.0.1 | Checkpointer (InMemorySaver), flujo de mensajes |
+| Grafos de agente | `langgraph` + `langgraph-checkpoint` + `langgraph-checkpoint-redis` | 1.0.10 / 4.0.1 / ≥0.4.0 | Checkpointer (AsyncRedisSaver / InMemorySaver), flujo de mensajes |
 | OpenAI SDK | `openai` | 2.26.0 | Error types (`AuthenticationError`, `RateLimitError`, etc.) |
 | HTTP client | `httpx` | 0.28.1 | Llamadas async a APIs externas |
 | Retry | `tenacity` | 9.1.4 | Backoff exponencial en `post_with_logging` |
@@ -1318,7 +1334,6 @@ Todas las dependencias están pinneadas en [`pyproject.toml`](pyproject.toml) co
 
 - Python 3.12+
 - `uv` ([instalación](https://docs.astral.sh/uv/getting-started/installation/))
-- `OPENAI_API_KEY` válida
 - Acceso a red hacia `api.maravia.pe` (APIs externas)
 
 ### Instalación
@@ -1334,7 +1349,8 @@ uv pip install .
 
 # 3. Configurar variables de entorno
 cp .env.example .env
-# Editar .env con OPENAI_API_KEY y URLs de APIs si son distintas al default
+# Editar .env con OPENAI_MODEL y URLs de APIs si son distintas al default
+# Nota: api_key de OpenAI se recibe per-request desde el gateway (ChatRequest.api_key)
 ```
 
 ### Ejecutar
@@ -1369,13 +1385,11 @@ curl -X POST http://localhost:8002/api/chat \
 
 ## 18. Limitaciones conocidas
 
-### 🔴 Memoria ilimitada (`InMemorySaver`)
+### ✅ Memoria conversacional (AsyncRedisSaver implementado)
 
-**Qué pasa:** `InMemorySaver` almacena el historial completo de cada conversación en RAM, sin TTL ni límite de tamaño. Los `session_id` de WhatsApp son permanentes; nunca se expiran. En un sistema multiempresa con 50–200 empresas y múltiples contactos activos, el proceso crece hasta que Docker lo mata por OOM.
+**Resuelto:** El agente soporta `AsyncRedisSaver` con TTL configurable (`REDIS_CHECKPOINT_TTL_HOURS`, default 24h) y fallback automático a `InMemorySaver`. La inicialización ocurre en `init_checkpointer()` durante el lifespan.
 
-**Impacto adicional:** Si el container se reinicia (deploy, crash), toda la memoria conversacional se pierde. Los usuarios experimentan el agente "olvidando" la conversación.
-
-**Solución pendiente:** Migrar a `AsyncRedisSaver` (Redis ya existe en Easypanel como `memori_agentes`) con TTL de 24 horas. Ver `docs/PENDIENTES.md`.
+**Sin Redis configurado** (`REDIS_URL` vacío): usa `InMemorySaver` — el historial se pierde al reiniciar el container y crece en RAM sin límite. Configurar `REDIS_URL` en Easypanel resuelve ambos problemas.
 
 ---
 
@@ -1411,13 +1425,9 @@ curl -X POST http://localhost:8002/api/chat \
 
 ---
 
-### 🟢 Sin tests automatizados
+### 🟡 Tests en desarrollo
 
-El proyecto no cuenta con suite de tests. Las áreas críticas a cubrir son:
-- `ScheduleValidator.validate()` — los 12 pasos con fechas/horas edge cases
-- `booking._parse_time_to_24h()` y `_build_fecha_inicio_fin()` — conversiones de tiempo
-- `CircuitBreaker` — transiciones de estado y auto-reset
-- `_validate_context()` y `_prepare_agent_context()` — manejo de config incompleta
+Existe estructura de tests (`test/unit/` y `test/integration/`) con archivos para validation, cache, content, config, middleware, agent y API. Pendiente: completar cobertura e instalar deps dev (`uv pip install --group dev`).
 
 ---
 
@@ -1428,22 +1438,20 @@ El detalle completo con código de implementación está en [`docs/PENDIENTES.md
 ### Resumen por prioridad
 
 ```
-🔴 ANTES DE PRODUCCIÓN CON CARGA REAL:
-   1. InMemorySaver → AsyncRedisSaver (TTL 24h)
-      - langgraph-checkpoint-redis
-      - REDIS_URL=redis://memori_agentes:6379 (ya existe en Easypanel)
-      - Archivos: agent/agent.py, pyproject.toml
+✅ IMPLEMENTADOS:
+   - AsyncRedisSaver con TTL + fallback InMemorySaver (agent/runtime/_llm.py)
+   - api_key per-tenant en ChatRequest (cache key con sha256)
+   - Ventana de mensajes (wrap_model_call + trim_messages, max=20)
+   - Middleware no destructivo: checkpointer intacto, compatible con Redis
 
+🔴 ANTES DE PRODUCCIÓN CON CARGA REAL:
+   1. Configurar REDIS_URL en Easypanel (código listo, falta infra)
    2. Auth X-Internal-Token en /api/chat
       - FastAPI Depends + nuevo env var INTERNAL_API_TOKEN
       - También actualizar gateway Go
 
-✅ IMPLEMENTADOS:
-   - Ventana de mensajes (wrap_model_call + trim_messages, max=20)
-   - Middleware no destructivo: checkpointer intacto, compatible con Redis
-
 🟢 DIFERIDAS:
-   - Tests unitarios (pytest + pytest-asyncio)
+   - Completar tests unitarios (estructura creada en test/)
    - Streaming SSE — descartado (canal WhatsApp, respuesta siempre completa)
 ```
 
