@@ -154,38 +154,29 @@ async def process_cita_message(
 
     # Backpressure: limitar invocaciones concurrentes al agente (OpenAI + tools)
     async with _semaphore:
-        # Serializar requests concurrentes del mismo usuario para evitar condiciones
-        # de carrera sobre el mismo thread_id del checkpointer (InMemorySaver).
-        lock = acquire_session_lock(session_id)
-        async with lock:
-            try:
-                agent = await _get_agent(id_empresa, api_key, config)
-            except Exception as e:
-                logger.error("[AGENT] Error creando agent: %s", e, exc_info=True)
-                record_chat_error("agent_creation_error")
-                return ("Disculpa, tuve un problema de configuración. ¿Podrías intentar nuevamente?", None)
+        try:
+            agent = await _get_agent(id_empresa, api_key, config)
+        except Exception as e:
+            logger.error("[AGENT] Error creando agent: %s", e, exc_info=True)
+            record_chat_error("agent_creation_error")
+            return ("Disculpa, tuve un problema de configuración. ¿Podrías intentar nuevamente?", None)
 
-            agent_context = _prepare_agent_context(id_empresa, config, session_id)
+        agent_context = _prepare_agent_context(id_empresa, config, session_id)
+        run_config = {"configurable": {"thread_id": str(session_id)}}
 
-            # LangGraph checkpointer usa thread_id como str
-            run_config = {
-                "configurable": {
-                    "thread_id": str(session_id)
-                }
-            }
-            try:
-                logger.debug("[AGENT] Invocando agent - Session: %s, Message: %s...", session_id, message[:100])
+        # Session lock: serializa requests concurrentes del mismo usuario
+        session_lock = acquire_session_lock(session_id)
 
-                with track_chat_response():
+        try:
+            with track_chat_response():
+                async with session_lock:
+                    logger.debug("[AGENT] Invocando agent - Session: %s, Message: %s...", session_id, message[:100])
+
                     with track_llm_call():
                         result = await agent.ainvoke(
-                            {
-                                "messages": [
-                                    {"role": "user", "content": _build_content(message)}
-                                ]
-                            },
+                            {"messages": [{"role": "user", "content": _build_content(message)}]},
                             config=run_config,
-                            context=agent_context
+                            context=agent_context,
                         )
 
                 structured = result.get("structured_response")
@@ -227,14 +218,15 @@ async def process_cita_message(
 
                 logger.debug("[AGENT] Respuesta generada: %s...", (reply[:200], url))
 
-            except tuple(_OPENAI_ERRORS.keys()) as e:
-                log_level, error_key, log_tag, user_msg = _OPENAI_ERRORS[type(e)]
-                getattr(logger, log_level)("[AGENT][%s] Session: %s | %s", log_tag, session_id, e)
-                record_chat_error(error_key)
-                return (user_msg, None)
-            except Exception as e:
-                logger.error("[AGENT] Error inesperado (%s) - Session: %s | %s", type(e).__name__, session_id, e, exc_info=True)
-                record_chat_error("agent_execution_error")
-                return ("Disculpa, tuve un problema al procesar tu mensaje. ¿Podrías intentar nuevamente?", None)
+        except tuple(_OPENAI_ERRORS.keys()) as e:
+            log_level, error_key, log_tag, user_msg = _OPENAI_ERRORS[type(e)]
+            getattr(logger, log_level)("[AGENT][%s] Session: %s | %s", log_tag, session_id, e)
+            record_chat_error(error_key)
+            return (user_msg, None)
 
-    return (reply, url)
+        except Exception as e:
+            logger.error("[AGENT] Error inesperado (%s) - Session: %s | %s", type(e).__name__, session_id, e, exc_info=True)
+            record_chat_error("agent_execution_error")
+            return ("Disculpa, tuve un problema al procesar tu mensaje. ¿Podrías intentar nuevamente?", None)
+
+        return (reply, url)
