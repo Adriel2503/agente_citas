@@ -32,7 +32,7 @@ USER appuser
 
 EXPOSE 8002
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+HEALTHCHECK --interval=300s --timeout=5s --start-period=10s --retries=2 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8002/health')" || exit 1
 
 CMD ["python", "-m", "citas.main"]

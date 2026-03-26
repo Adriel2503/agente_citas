@@ -199,6 +199,14 @@ def main():
     logger.info("- search_productos_servicios (busca productos/servicios)")
     logger.info("=" * 60)
 
+    # Filtrar logs de healthcheck exitosos (200) — los 503 sí se loguean
+    class _HealthLogFilter(logging.Filter):
+        def filter(self, record: logging.LogRecord) -> bool:
+            msg = record.getMessage()
+            return not ('"GET /health' in msg and "200" in msg)
+
+    logging.getLogger("uvicorn.access").addFilter(_HealthLogFilter())
+
     uvicorn.run(
         app,
         host=app_config.SERVER_HOST,
