@@ -437,6 +437,20 @@ Maximo de invocaciones concurrentes al agente (LLM + tools). Implementado como `
 - Subir si tienes muchas empresas con alto trafico simultaneo
 - Bajar si el servidor tiene pocos recursos y quieres proteger la memoria/CPU
 
+### `INTERNAL_API_TOKEN`
+
+- **Default:** `""` (vacio = auth desactivada)
+
+Token compartido para autenticacion inter-servicio. El gateway Go envia el header `X-Internal-Token` en cada request a `/api/chat`. Si el token no coincide, el agente responde 401.
+
+**Comportamiento:**
+- Vacio o ausente → auth desactivada, todos los requests pasan
+- Con valor → solo requests con header `X-Internal-Token` correcto pasan
+
+**Cuando configurarlo:** Cuando el gateway Go este enviando el header. Configurar simultaneamente en el agente y en Go para evitar 401.
+
+**Endpoints protegidos:** Solo `/api/chat`. `/health` y `/metrics` quedan sin auth (accesibles para Docker healthcheck y Prometheus).
+
 ### `DATABASE_URL`
 
 - **Default:** `""` (vacio)

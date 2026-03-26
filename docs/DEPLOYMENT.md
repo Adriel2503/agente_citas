@@ -615,7 +615,7 @@ Para 50 empresas activas simultaneamente: ~150-300 MB solo en agentes + caches. 
 
 | Medida | Estado | Referencia |
 |--------|--------|------------|
-| Auth `X-Internal-Token` en `/api/chat` | Pendiente | [PENDIENTES.md](PENDIENTES.md) C2 |
+| Auth `X-Internal-Token` en `/api/chat` | Implementado (desactivable via `INTERNAL_API_TOKEN`) | [CONFIGURACION.md](CONFIGURACION.md) |
 | HTTPS / TLS | N/A — Easypanel/gateway maneja TLS | — |
 | Rate limiting | No implementado | Depende del gateway Go |
 | Read-only filesystem | Compatible — el agente no escribe al disco | `--read-only` en Docker |

@@ -1,42 +1,15 @@
 # Pendientes técnicos — agent_citas
 
-Madurez actual: **9.5 / 10** (solo queda C2 auth y tests).
+Madurez actual: **10 / 10** (auth implementado, solo quedan tests y coordinación backend).
 
 ---
 
 ## Resueltos
 
-C1 (AsyncRedisSaver), M1 (message window 20 turnos), M2 (circuit breaker calendario),
+C1 (AsyncRedisSaver), C2 (auth X-Internal-Token), M1 (message window 20 turnos), M2 (circuit breaker calendario),
 M3 (lock cleanup), O2 (health 503), O3 (thundering herd), E1 (mapeo 10 excepciones OpenAI).
 
 ---
-
-## 🔴 Críticos (deben resolverse antes de producción)
-
-### C2 — Sin autenticación en `/api/chat`
-
-**Problema:** Cualquiera con acceso de red puede llamar al endpoint. En Easypanel los
-servicios son internos, pero es buena práctica tenerlo de todas formas.
-
-**Solución mínima:** Header compartido `X-Internal-Token` validado en FastAPI.
-
-```python
-# main.py — agregar middleware o dependency
-from fastapi import Header, HTTPException, Depends
-
-INTERNAL_TOKEN = app_config.INTERNAL_API_TOKEN  # nueva env var
-
-async def verify_token(x_internal_token: str = Header(...)):
-    if x_internal_token != INTERNAL_TOKEN:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-
-# Aplicar a /api/chat:
-@app.post("/api/chat", response_model=ChatResponse, dependencies=[Depends(verify_token)])
-async def chat(req: ChatRequest) -> ChatResponse:
-    ...
-```
-
-También requiere agregar el header en el gateway Go al hacer la llamada al agente.
 
 ---
 
@@ -133,7 +106,7 @@ Reglas pendientes de implementar en el prompt:
 
 ```
 Pendiente:
-  ⚠️  C2 — Auth X-Internal-Token
   📋 B1 — slots en CREAR_EVENTO (requiere backend PHP)
   📋 Tests unitarios
+  📋 Activar auth — configurar INTERNAL_API_TOKEN en Easypanel + gateway Go
 ```
