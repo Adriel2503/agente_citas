@@ -32,6 +32,7 @@ from .config import (
     API_INFORMACION_URL,
     API_PREGUNTAS_FRECUENTES_URL,
     TIMEZONE,
+    INTERNAL_API_TOKEN,
 )
 from .circuit_breakers import (
     informacion_cb,
@@ -73,6 +74,7 @@ __all__ = [
     "MAX_CONCURRENT_AGENT",
     "REDIS_URL",
     "REDIS_CHECKPOINT_TTL_HOURS",
+    "INTERNAL_API_TOKEN",
     "informacion_cb",
     "preguntas_cb",
     "calendario_cb",

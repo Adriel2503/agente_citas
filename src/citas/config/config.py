@@ -185,3 +185,9 @@ API_PREGUNTAS_FRECUENTES_URL: str = _get_str(
 # ---------------------------------------------------------------------------
 
 TIMEZONE: str = _get_str("TIMEZONE", "America/Lima")
+
+# ---------------------------------------------------------------------------
+# Auth inter-servicio (vacío = desactivada)
+# ---------------------------------------------------------------------------
+
+INTERNAL_API_TOKEN: str = _get_str("INTERNAL_API_TOKEN", "")

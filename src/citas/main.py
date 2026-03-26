@@ -12,7 +12,7 @@ import uuid
 from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import JSONResponse
 from prometheus_client import make_asgi_app
 
@@ -67,10 +67,23 @@ app.mount("/metrics", make_asgi_app())
 
 
 # ---------------------------------------------------------------------------
+# Auth inter-servicio (desactivable)
+# ---------------------------------------------------------------------------
+
+async def verify_token(x_internal_token: str = Header(default=None)):
+    """Valida token inter-servicio. Si INTERNAL_API_TOKEN está vacío, auth desactivada."""
+    token = app_config.INTERNAL_API_TOKEN
+    if not token:
+        return
+    if x_internal_token != token:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+# ---------------------------------------------------------------------------
 # Endpoint principal
 # ---------------------------------------------------------------------------
 
-@app.post("/api/chat", response_model=ChatResponse)
+@app.post("/api/chat", response_model=ChatResponse, dependencies=[Depends(verify_token)])
 async def chat(req: ChatRequest) -> ChatResponse:
     """
     Agente especializado en citas / reuniones.
