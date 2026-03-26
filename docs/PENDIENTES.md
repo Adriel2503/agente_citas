@@ -1,23 +1,13 @@
 # Pendientes técnicos — agent_citas
 
-Madurez actual: **9 / 10** (C1 resuelto, solo queda C2 auth y tests).
+Madurez actual: **9.5 / 10** (solo queda C2 auth y tests).
 
 ---
 
 ## Resueltos
 
-| ID | Descripción | Archivo(s) |
-|----|-------------|-----------|
-| C1 | AsyncRedisSaver con TTL 24h + fallback InMemorySaver | `agent/runtime/_llm.py`, `main.py`, `pyproject.toml` |
-| M1 | Límite de ventana de mensajes (20 turnos) | `agent/runtime/middleware.py` |
-| O2 | `/health` retorna 503 cuando APIs degradadas | `main.py`, `circuit_breaker.py` |
-| O3 | Thundering herd en `contexto_negocio` y `preguntas_frecuentes` | `contexto_negocio.py`, `preguntas_frecuentes.py` |
-| M3 | Lock cleanup simplificado (async → sync, `lock.locked()`) | `agent/agent.py` |
-| M2 | Circuit breaker para `ws_calendario.php` | `booking.py`, `circuit_breaker.py`, `main.py` |
-
-C1 implementado en `agent/runtime/_llm.py` (`init_checkpointer` / `close_checkpointer`),
-dep `langgraph-checkpoint-redis>=0.4.0` en `pyproject.toml`, `REDIS_URL` configurado en Easypanel
-apuntando a `memori_agentes`. Fallback automático a InMemorySaver si Redis no disponible.
+C1 (AsyncRedisSaver), M1 (message window 20 turnos), M2 (circuit breaker calendario),
+M3 (lock cleanup), O2 (health 503), O3 (thundering herd), E1 (mapeo 10 excepciones OpenAI).
 
 ---
 
@@ -80,7 +70,7 @@ slot validado como disponible pero creado con comportamiento distinto al esperad
 
 **Archivos Python a modificar cuando el PHP esté listo:**
 - `src/citas/services/booking.py` — agregar `slots` al payload
-- `src/citas/tool/tools.py` — pasar `slots` desde `ctx.slots`
+- `src/citas/tools/tools.py` — pasar `slots` desde `ctx.slots`
 
 ---
 
@@ -137,24 +127,13 @@ Reglas pendientes de implementar en el prompt:
 - `url` de saludo (`archivo_saludo`): solo en el primer mensaje de la conversación.
 - `url` de producto: solo cuando el usuario eligió un producto concreto y la tool devolvió URL. Si mostró varios y el usuario no eligió, dejar `url` vacío.
 
-### Streaming
-
-Actualmente el gateway espera la respuesta completa antes de enviarla al cliente.
-El TTFT (Time To First Token) es igual al tiempo total de respuesta (~3–8s).
-
-Para habilitar streaming: FastAPI `StreamingResponse` + LangGraph `astream_events`.
-Requiere cambios en el gateway Go para consumir SSE y retransmitir a N8N/WhatsApp.
-
 ---
 
 ## Resumen de prioridades
 
 ```
-✅ C1 — AsyncRedisSaver con TTL 24h (en producción, Redis en Easypanel)
-✅ M1 — trim_messages (message_window middleware)
-
 Pendiente:
   ⚠️  C2 — Auth X-Internal-Token
-  📋 B1 — slots en CREAR_EVENTO (requiere coordinación con backend PHP)
+  📋 B1 — slots en CREAR_EVENTO (requiere backend PHP)
   📋 Tests unitarios
 ```

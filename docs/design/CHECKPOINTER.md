@@ -354,3 +354,85 @@ Por eso se sobreescribe `.serde` después de crear la instancia:
 saver = AsyncRedisSaver(redis_url=...)
 saver.serde = JsonPlusRedisSerializer(allowed_json_modules=[...])  # overwrite
 ```
+
+---
+
+## 9. Ventana de mensajes (message window)
+
+### Implementación actual: Opción B — `wrap_model_call`
+
+Intercepta la llamada al LLM y recorta una copia del request. El checkpointer **no se modifica** — Redis guarda historial completo, el LLM solo ve los últimos N mensajes.
+
+**Archivo:** `src/citas/agent/runtime/middleware.py`
+**Variable:** `MAX_MESSAGES_HISTORY` (default 20, min 4, max 200)
+
+### El problema del par AI↔Tool
+
+OpenAI exige que todo `ToolMessage` tenga un `AIMessage` padre con el mismo `tool_call_id`. Si un corte elimina el `AIMessage` pero deja el `ToolMessage`:
+
+```
+BadRequestError: messages with role 'tool' must be a response
+to a preceding message with 'tool_calls'
+```
+
+Solución: `trim_messages(..., allow_partial=False)` nunca corta en medio de un par.
+
+### Opciones evaluadas
+
+| | A `@before_model` | **B `wrap_model_call` ✅** | C `Summarization` | D `ContextEditing` | E Custom |
+|---|---|---|---|---|---|
+| Redis historial completo | No | **Sí** | No | No | Sí |
+| Configurable por N msgs | Sí | **Sí** | Sí | No | Sí |
+| Preserva semántica msgs viejos | No | **No** | Sí | Parcial | Sí |
+| Costo extra LLM | No | **No** | 1 llamada | No | 1 llamada |
+| Par AI↔Tool seguro | Sí | **Sí** | Sí | Sí | Manual |
+| Built-in | Sí | **Sí** | Sí | Sí | No |
+
+### Migración futura a SummarizationMiddleware (Opción C)
+
+Si el agente necesita recordar contexto de muchos turnos atrás, reemplazar middleware:
+
+```python
+from langchain.agents.middleware import SummarizationMiddleware
+
+agent = create_agent(
+    ...,
+    middleware=[SummarizationMiddleware(
+        model=model,
+        trigger=("messages", 20),
+        keep=("messages", 10),
+    )]
+)
+```
+
+Trade-off: preserva semántica pero pierde historial exacto en Redis y cuesta 1 llamada extra al LLM.
+
+---
+
+## 10. Recursos y memoria RAM
+
+### Por qué Redis es necesario
+
+`InMemorySaver` crece sin límite (~50 MB/día con 100 contactos nuevos). Los caches TTL tienen techo fijo, pero el checkpointer no:
+
+```
+Sin Redis:  512 MB → OOM en ~3-5 días
+            768 MB → OOM en ~7-10 días
+            1 GB   → OOM en ~2-3 semanas
+
+Con Redis:  RAM estable en ~308-428 MB (techo fijo)
+            512 MB es suficiente indefinidamente
+```
+
+### Recomendaciones de recursos
+
+| Escenario | RAM container | CPU |
+|-----------|--------------|-----|
+| Desarrollo local | 512 MB | 1 core |
+| Producción con Redis | 512 MB | 1 core |
+| Producción sin Redis (temporal) | 768 MB | 1 core |
+
+| Redis (`memori_agentes`) | RAM |
+|--------------------------|-----|
+| < 50 empresas | 128 MB |
+| 50-200 empresas | 256 MB |

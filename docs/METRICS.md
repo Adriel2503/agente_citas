@@ -1,6 +1,6 @@
 # Metricas Prometheus — Agent Citas
 
-El agente expone **19 metricas** en `GET /metrics` (puerto 8002) via `prometheus_client`.
+El agente expone **21 metricas** en `GET /metrics` (puerto 8002) via `prometheus_client`.
 Formato: Prometheus text/plain.
 
 Prefijo unico: **`citas_`** para todas las metricas (negocio e infraestructura).
@@ -12,12 +12,15 @@ Prefijo unico: **`citas_`** para todas las metricas (negocio e infraestructura).
 
 ## Inventario de metricas
 
-### Contadores (12)
+### Contadores (14)
 
 | Nombre | Labels | Descripcion |
 |--------|--------|-------------|
 | `citas_chat_requests_total` | `empresa_id` | Mensajes recibidos por el agente |
 | `citas_chat_errors_total` | `error_type` | Errores procesando mensajes |
+| `citas_llm_requests_total` | `status` | Invocaciones al agente LLM |
+| `citas_llm_tokens_total` | `type` | Tokens consumidos (input/output/total) |
+| `citas_llm_tokens_by_empresa_total` | `empresa_id`, `type` | Tokens consumidos por empresa |
 | `citas_booking_attempts_total` | — | Intentos de crear cita |
 | `citas_booking_success_total` | — | Citas creadas exitosamente |
 | `citas_booking_failed_total` | `reason` | Citas fallidas |
@@ -34,10 +37,10 @@ Prefijo unico: **`citas_`** para todas las metricas (negocio e infraestructura).
 | Nombre | Labels | Descripcion | Buckets (s) |
 |--------|--------|-------------|-------------|
 | `citas_http_duration_seconds` | — | Latencia total /api/chat | 0.25, 0.5, 1, 2.5, 5, 10, 20, 30, 60, 90, 120 |
-| `citas_chat_response_duration_seconds` | `status` | Tiempo de respuesta del agente | 0.1, 0.5, 1, 2, 5, 10, 30, 60, 90 |
+| `citas_llm_duration_seconds` | `status` | Latencia de agent.ainvoke (LLM + tool calls) | 0.5, 1, 2, 5, 10, 20, 30, 60, 90 |
+| `citas_chat_response_duration_seconds` | `status` | Latencia total del procesamiento (lock + ainvoke + resultado) | 0.1, 0.5, 1, 2, 5, 10, 20, 30, 60, 90 |
 | `citas_tool_execution_duration_seconds` | `tool_name` | Latencia por tool | 0.1, 0.5, 1, 2, 5, 10, 20, 30 |
 | `citas_api_call_duration_seconds` | `endpoint` | Latencia de APIs externas | 0.1, 0.25, 0.5, 1, 2.5, 5, 10 |
-| `citas_llm_call_duration_seconds` | `status` | Latencia de llamadas a OpenAI | 0.5, 1, 2, 5, 10, 20, 30, 60, 90 |
 
 Cada histograma genera 3 series: `_bucket`, `_sum`, `_count`.
 
@@ -80,12 +83,17 @@ Cada histograma genera 3 series: `_bucket`, `_sum`, `_count`.
 |-------|-------------|
 | `context_error` | Validacion de contexto fallida |
 | `agent_creation_error` | Error creando el agente LangGraph |
-| `openai_auth_error` | API key invalida |
-| `openai_rate_limit` | Rate limit de OpenAI |
-| `openai_server_error` | Error 5xx de OpenAI |
+| `openai_auth_error` | API key invalida (401) |
+| `openai_permission_denied` | API key sin permisos (403) |
+| `openai_not_found` | Modelo no disponible (404) |
+| `openai_rate_limit` | Rate limit de OpenAI (429) |
+| `openai_server_error` | Error del servidor OpenAI (5xx) |
+| `openai_timeout` | Timeout de OpenAI |
 | `openai_connection_error` | No se pudo conectar a OpenAI |
-| `openai_bad_request` | Request invalido a OpenAI |
-| `agent_execution_error` | Error durante ejecucion del agente |
+| `openai_content_filter` | Contenido rechazado por filtro |
+| `openai_length_limit` | Respuesta cortada por max_tokens |
+| `openai_bad_request` | Request invalido a OpenAI (400) |
+| `agent_execution_error` | Error no clasificado durante ejecucion |
 
 ### `reason` — booking_failed_total
 
@@ -208,8 +216,8 @@ rate(citas_http_duration_seconds_sum[5m])
   / rate(citas_http_duration_seconds_count[5m])
 
 # Latencia promedio LLM
-rate(citas_llm_call_duration_seconds_sum[5m])
-  / rate(citas_llm_call_duration_seconds_count[5m])
+rate(citas_llm_duration_seconds_sum[5m])
+  / rate(citas_llm_duration_seconds_count[5m])
 
 # Latencia promedio por tool
 rate(citas_tool_execution_duration_seconds_sum[5m])
@@ -227,7 +235,7 @@ rate(citas_api_call_duration_seconds_sum[5m])
 histogram_quantile(0.95, rate(citas_http_duration_seconds_bucket[5m]))
 
 # p50 latencia LLM
-histogram_quantile(0.50, rate(citas_llm_call_duration_seconds_bucket[5m]))
+histogram_quantile(0.50, rate(citas_llm_duration_seconds_bucket[5m]))
 
 # p99 latencia /api/chat
 histogram_quantile(0.99, rate(citas_http_duration_seconds_bucket[5m]))
