@@ -24,7 +24,7 @@ Guia completa para desplegar el agente de citas en local, Docker y Easypanel (pr
 | Requisito | Version minima | Notas |
 |-----------|---------------|-------|
 | Python | 3.12 | Dockerfile usa `python:3.12-slim` |
-| OpenAI API Key | — | Modelo `gpt-4o-mini` por defecto |
+| OpenAI API Key | — | Per-request desde el gateway (no es variable de entorno) |
 | Acceso a APIs MaravIA | — | `ws_calendario`, `ws_agendar_reunion`, `ws_informacion_ia`, `ws_preguntas_frecuentes` |
 | Docker (opcional) | 24+ | Para despliegue en contenedor |
 | Redis (opcional) | 7+ | Para checkpointer persistente (`memori_agentes` en Easypanel) |
@@ -104,141 +104,19 @@ Tools internas del agente:
 
 ## Variables de Entorno
 
-### Minimas requeridas
+No hay variables obligatorias — la `api_key` de OpenAI se recibe per-request desde el gateway. Todos los parametros tienen defaults funcionales.
 
-No hay variables obligatorias — la `api_key` de OpenAI se recibe per-request desde el gateway (`ChatRequest.api_key`). Todos los demas parametros tienen defaults funcionales. Ver `.env.example` para la plantilla completa.
+Para la referencia completa de cada variable (que hace, cuando cambiarla, rangos), ver [CONFIGURACION.md](CONFIGURACION.md).
 
-### Referencia completa
-
-#### Development (`.env`)
+### Variables criticas para Easypanel
 
 ```bash
-# ── LLM (api_key viene per-request desde el gateway) ──────
-OPENAI_MODEL=gpt-4o-mini
-OPENAI_TEMPERATURE=0.5
-OPENAI_TIMEOUT=60
-MAX_TOKENS=2048
-
-# ── Servidor ───────────────────────────────────────────────
-SERVER_HOST=0.0.0.0
-SERVER_PORT=8002
-CHAT_TIMEOUT=120
-
-# ── Logging ────────────────────────────────────────────────
-LOG_LEVEL=DEBUG
-LOG_FILE=                         # vacio = solo stdout
-
-# ── HTTP y reintentos ─────────────────────────────────────
-API_TIMEOUT=10                    # timeout de lectura de APIs MaravIA
-HTTP_RETRY_ATTEMPTS=3             # reintentos ante TransportError
-HTTP_RETRY_WAIT_MIN=1             # backoff minimo (segundos)
-HTTP_RETRY_WAIT_MAX=4             # backoff maximo (segundos)
-
-# ── Circuit breaker ───────────────────────────────────────
-CB_THRESHOLD=3                    # fallos consecutivos para abrir
-CB_RESET_TTL=300                  # segundos hasta auto-reset (5 min)
-
-# ── Cache ─────────────────────────────────────────────────
-AGENT_CACHE_TTL_MINUTES=60        # agente compilado por empresa
-AGENT_CACHE_MAXSIZE=500           # maximo de agentes en cache
-SEARCH_CACHE_TTL_MINUTES=15       # busqueda de productos/servicios
-SEARCH_CACHE_MAXSIZE=2000         # maximo de busquedas en cache
-MAX_MESSAGES_HISTORY=20           # ventana de mensajes enviados al LLM
-
-# ── Zona horaria ──────────────────────────────────────────
-TIMEZONE=America/Lima
-
-# ── APIs MaravIA ──────────────────────────────────────────
-API_CALENDAR_URL=https://api.maravia.pe/servicio/ws_calendario.php
-API_AGENDAR_REUNION_URL=https://api.maravia.pe/servicio/ws_agendar_reunion.php
-API_INFORMACION_URL=https://api.maravia.pe/servicio/ws_informacion_ia.php
-API_PREGUNTAS_FRECUENTES_URL=https://api.maravia.pe/servicio/n8n/ws_preguntas_frecuentes.php
-
-# ── Redis (checkpointer persistente) ──────────────────────
-# REDIS_URL=redis://localhost:6379
-
-# ── LangSmith tracing (opcional, para debugging) ──────────
-LANGCHAIN_TRACING_V2=false
-# LANGCHAIN_API_KEY=<tu_langsmith_api_key>
-# LANGCHAIN_PROJECT=agent_citas
+REDIS_URL=redis://memori_agentes:6379   # checkpointer persistente
+LOG_LEVEL=INFO                          # WARNING en produccion estable
+LOG_FILE=                               # vacio: Docker captura stdout
 ```
 
-#### Production (Easypanel / variables de entorno del servicio)
-
-```bash
-# ── LLM (api_key viene per-request desde el gateway) ──────
-OPENAI_MODEL=gpt-4o-mini          # gpt-4o para mayor calidad
-OPENAI_TEMPERATURE=0.5
-OPENAI_TIMEOUT=60
-MAX_TOKENS=2048
-
-# ── Servidor ───────────────────────────────────────────────
-SERVER_HOST=0.0.0.0
-SERVER_PORT=8002
-CHAT_TIMEOUT=120
-
-# ── Logging ────────────────────────────────────────────────
-LOG_LEVEL=INFO                    # WARNING en produccion estable
-LOG_FILE=                         # vacio: Docker captura stdout (docker logs)
-
-# ── HTTP y reintentos ─────────────────────────────────────
-API_TIMEOUT=10
-HTTP_RETRY_ATTEMPTS=3
-HTTP_RETRY_WAIT_MIN=1
-HTTP_RETRY_WAIT_MAX=4
-
-# ── Circuit breaker ───────────────────────────────────────
-CB_THRESHOLD=3
-CB_RESET_TTL=300
-
-# ── Cache ─────────────────────────────────────────────────
-AGENT_CACHE_TTL_MINUTES=60
-AGENT_CACHE_MAXSIZE=500
-SEARCH_CACHE_TTL_MINUTES=15       # busqueda de productos/servicios
-SEARCH_CACHE_MAXSIZE=2000
-MAX_MESSAGES_HISTORY=20
-
-# ── Zona horaria ──────────────────────────────────────────
-TIMEZONE=America/Lima
-
-# ── APIs MaravIA ──────────────────────────────────────────
-API_CALENDAR_URL=https://api.maravia.pe/servicio/ws_calendario.php
-API_AGENDAR_REUNION_URL=https://api.maravia.pe/servicio/ws_agendar_reunion.php
-API_INFORMACION_URL=https://api.maravia.pe/servicio/ws_informacion_ia.php
-API_PREGUNTAS_FRECUENTES_URL=https://api.maravia.pe/servicio/n8n/ws_preguntas_frecuentes.php
-
-# ── Redis (hostname interno Docker Compose en Easypanel) ──
-REDIS_URL=redis://memori_agentes:6379
-
-# ── LangSmith ─────────────────────────────────────────────
-LANGCHAIN_TRACING_V2=false
-```
-
-**Nota sobre `LOG_FILE` en Docker:** El container corre como usuario `appuser` (sin home directory ni permisos de escritura fuera de `/tmp`). En produccion con Docker, dejar `LOG_FILE` vacio y usar `docker logs` para ver la salida de stdout. Si necesitas archivo de log, monta un volumen con permisos de escritura.
-
-### Valores y rangos validados
-
-Todos los valores se validan en `config/config.py`. Si un valor esta fuera de rango o tiene tipo invalido, el sistema usa el default sin error.
-
-| Variable | Tipo | Rango | Default |
-|----------|------|-------|---------|
-| `OPENAI_TEMPERATURE` | float | 0.0 – 2.0 | `0.5` |
-| `OPENAI_TIMEOUT` | int | 1 – 300s | `60` |
-| `MAX_TOKENS` | int | 1 – 128000 | `2048` |
-| `SERVER_PORT` | int | 1 – 65535 | `8002` |
-| `API_TIMEOUT` | int | 1 – 120s | `10` |
-| `CHAT_TIMEOUT` | int | 30 – 300s | `120` |
-| `HTTP_RETRY_ATTEMPTS` | int | 1 – 10 | `3` |
-| `HTTP_RETRY_WAIT_MIN` | int | 0 – 30s | `1` |
-| `HTTP_RETRY_WAIT_MAX` | int | 1 – 60s | `4` |
-| `CB_THRESHOLD` | int | 1 – 20 | `3` |
-| `CB_RESET_TTL` | int | 60 – 3600s | `300` |
-| `AGENT_CACHE_TTL_MINUTES` | int | 5 – 1440 min | `60` |
-| `AGENT_CACHE_MAXSIZE` | int | 10 – 5000 | `500` |
-| `SEARCH_CACHE_TTL_MINUTES` | int | 1 – 60 min | `15` |
-| `SEARCH_CACHE_MAXSIZE` | int | 10 – 10000 | `2000` |
-| `MAX_MESSAGES_HISTORY` | int | 4 – 200 | `20` |
-| `LOG_LEVEL` | string | `DEBUG\|INFO\|WARNING\|ERROR\|CRITICAL` | `INFO` |
+**Nota sobre `LOG_FILE` en Docker:** El container corre como usuario `appuser` (sin permisos de escritura fuera de `/tmp`). Dejar vacio y usar `docker logs`.
 
 ---
 
@@ -480,23 +358,14 @@ Respuesta esperada:
 ### 3. Verificar metricas
 
 ```bash
-curl http://localhost:8002/metrics | grep agent_citas
+curl -s http://localhost:8002/metrics | grep citas_
 ```
 
 Deberia mostrar contadores como:
 ```
-agent_citas_chat_requests_total{empresa_id="123"} 1
-agent_citas_info{agent_type="citas",model="gpt-4o-mini",version="2.5.0"} 1
-```
-
-```bash
-# Metricas HTTP (prefijo citas_)
-curl http://localhost:8002/metrics | grep citas_http
-```
-
-```
+citas_chat_requests_total{empresa_id="123"} 1
+citas_info_info{agent_type="citas",model="gpt-4o-mini",version="2.5.0"} 1
 citas_http_requests_total{status="success"} 1
-citas_http_duration_seconds_count 1
 ```
 
 ### 4. Verificar logs
@@ -539,10 +408,10 @@ scrape_configs:
 | `citas_http_duration_seconds` p95 > 10s | Latencia alta — revisar LLM o APIs |
 | `citas_http_requests_total{status="timeout"}` tasa > 5% | Requests excediendo CHAT_TIMEOUT |
 | `citas_http_requests_total{status="error"}` tasa creciente | Errores en el endpoint |
-| `agent_citas_booking_failed_total{reason="timeout"}` tasa > 5% | APIs MaravIA con problemas |
-| `agent_citas_booking_failed_total{reason="circuit_open"}` > 0 | Circuit breaker abierto, booking rechazado |
-| `agent_citas_booking_failed_total{reason="connection_error"}` | Conectividad a MaravIA |
-| `agent_citas_tool_errors_total` tasa creciente | Fallo en tools internas |
+| `citas_booking_failed_total{reason="timeout"}` tasa > 5% | APIs MaravIA con problemas |
+| `citas_booking_failed_total{reason="circuit_open"}` > 0 | Circuit breaker abierto, booking rechazado |
+| `citas_booking_failed_total{reason="connection_error"}` | Conectividad a MaravIA |
+| `citas_tool_errors_total` tasa creciente | Fallo en tools internas |
 | `citas_agent_cache_total{result="miss"}` tasa alta | Cache de agentes fria o TTL muy corto |
 | `citas_search_cache_total{result="circuit_open"}` > 0 | Circuit breaker abierto para busquedas |
 
@@ -622,7 +491,7 @@ curl -s http://localhost:8002/metrics | grep cache
 docker logs agent-citas 2>&1 | grep -i timeout
 
 # 3. Medir latencia del LLM vs total
-curl -s http://localhost:8002/metrics | grep -E "llm_call|chat_response"
+curl -s http://localhost:8002/metrics | grep -E "llm_duration|chat_response"
 ```
 
 **Soluciones:**
@@ -662,11 +531,9 @@ Los circuit breakers se auto-resetean despues de `CB_RESET_TTL` segundos (defaul
 
 ### Memoria del agente no persiste entre reinicios
 
-**Causa esperada:** El agente usa `InMemorySaver` (volatil por diseno).
+**Con Redis (produccion):** Las conversaciones persisten en Redis con TTL de 24h. Reiniciar el container no pierde contexto.
 
-**Impacto:** Al reiniciar el servidor (deploy, crash, redeploy en Easypanel), todas las conversaciones activas pierden contexto. El proximo mensaje del usuario inicia una conversacion nueva.
-
-**Solucion:** Migrar a `AsyncRedisSaver` con TTL de 24h (ver [Escalado](#migración-a-checkpointer-persistente-redis)).
+**Sin Redis (fallback InMemorySaver):** Al reiniciar el servidor, todas las conversaciones pierden contexto. Configurar `REDIS_URL` para resolver.
 
 ---
 
@@ -683,12 +550,12 @@ Los circuit breakers se auto-resetean despues de `CB_RESET_TTL` segundos (defaul
 | Escenario | Soporte |
 |-----------|---------|
 | 1 instancia, multiples usuarios | Funciona (locks por session_id) |
-| Multiples instancias (horizontal) | No soportado (memoria no compartida) |
-| Reinicio del servidor | Conversaciones perdidas |
+| Multiples instancias (horizontal) | Posible con Redis (checkpointer compartido) |
+| Reinicio del servidor | Con Redis: conversaciones persisten (TTL 24h). Sin Redis: se pierden |
 
-### Migracion a checkpointer persistente (Redis)
+### Checkpointer persistente (Redis)
 
-Redis (`memori_agentes`) ya existe en Easypanel. La migracion resuelve los 3 problemas de la tabla anterior. Ver [PENDIENTES.md](PENDIENTES.md) sección C1 para el código de implementación completo con fallback automático.
+Redis (`memori_agentes`) esta configurado en Easypanel con `REDIS_URL=redis://memori_agentes:6379`. El agente usa `AsyncRedisSaver` con TTL de 24h y fallback automatico a `InMemorySaver` si Redis no esta disponible. Ver [CHECKPOINTER.md](design/CHECKPOINTER.md) para detalles de la arquitectura.
 
 ### Workers de Uvicorn
 
@@ -771,9 +638,9 @@ curl -X POST http://localhost:8002/api/chat \
   -d '{"message":"test","session_id":1,"context":{"config":{"id_empresa":1}}}'
 
 # ── Metricas ──────────────────────────────────────────────
-curl -s http://localhost:8002/metrics | grep agent_citas
+curl -s http://localhost:8002/metrics | grep citas_
 curl -s http://localhost:8002/metrics | grep citas_http
-curl -s http://localhost:8002/metrics | grep booking
+curl -s http://localhost:8002/metrics | grep citas_booking
 
 # ── Version ───────────────────────────────────────────────
 python -c "from citas import __version__; print(__version__)"
@@ -784,4 +651,4 @@ python -c "from citas import __version__; print(__version__)"
 ## Proximos Pasos
 
 - [API.md](API.md) — referencia completa del endpoint `/api/chat`
-- [PENDIENTES.md](PENDIENTES.md) — roadmap tecnico (Redis, auth, tests)
+- [PENDIENTES.md](PENDIENTES.md) — roadmap tecnico (auth, tests)
