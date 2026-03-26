@@ -15,7 +15,7 @@ dist/
 .eggs/
 
 # uv (package manager)
-uv.lock
+#uv.lock
 .uv/
 .claude 
 .agents
