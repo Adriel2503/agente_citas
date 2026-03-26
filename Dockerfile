@@ -20,13 +20,17 @@ RUN adduser \
     appuser
 
 # Instalar uv (gestor de paquetes rápido)
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.9 /uv /usr/local/bin/uv
 
-# Instalar paquete (pyproject.toml + src/)
+# Instalar dependencias (cacheado si pyproject.toml no cambia)
 COPY pyproject.toml .
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system --no-install-project .
+
+# Instalar paquete (solo código, sin re-descargar deps)
 COPY src ./src
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system .
+    uv pip install --system --no-deps .
 
 USER appuser
 
