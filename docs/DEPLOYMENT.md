@@ -133,6 +133,7 @@ FROM python:${PYTHON_VERSION}-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
+ENV UV_LINK_MODE=copy
 ENV TZ=America/Lima
 
 WORKDIR /app
@@ -148,20 +149,24 @@ RUN adduser \
     --uid "${UID}" \
     appuser
 
-# Instalar uv (gestor de paquetes rápido)
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+# Instalar uv (gestor de paquetes rápido, versión pineada)
+COPY --from=ghcr.io/astral-sh/uv:0.9 /uv /usr/local/bin/uv
 
-# Instalar paquete (pyproject.toml + src/)
-COPY pyproject.toml .
+# Instalar dependencias (cacheado si pyproject.toml/uv.lock no cambian)
+COPY pyproject.toml uv.lock ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-install-project --no-dev
+
+# Instalar paquete (solo código, deps ya instaladas)
 COPY src ./src
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system .
+    uv sync --frozen --no-dev
 
 USER appuser
 
 EXPOSE 8002
 
-CMD ["python", "-m", "citas.main"]
+CMD [".venv/bin/python", "-m", "citas.main"]
 ```
 
 **Caracteristicas de seguridad del Dockerfile:**
