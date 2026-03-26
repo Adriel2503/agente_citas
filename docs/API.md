@@ -1042,15 +1042,7 @@ El agente usa 4 circuit breakers independientes. Cuando una API acumula 3 errore
 
 ### Retry con backoff exponencial
 
-Las llamadas de lectura (`post_with_logging`) usan tenacity con retry automático:
-
-| Parámetro | Default | Variable |
-|-----------|---------|----------|
-| Intentos máximos | 3 | `HTTP_RETRY_ATTEMPTS` |
-| Espera mínima | 1s | `HTTP_RETRY_WAIT_MIN` |
-| Espera máxima | 4s | `HTTP_RETRY_WAIT_MAX` |
-
-Solo se reintenta ante `httpx.TransportError`. `CREAR_EVENTO` **no** usa retry (no es idempotente).
+Las llamadas de lectura usan tenacity con retry automático (3 intentos, backoff 1-4s). Solo se reintenta ante `httpx.TransportError`. `CREAR_EVENTO` **no** usa retry (no es idempotente). Ver [CONFIGURACION.md](CONFIGURACION.md) para los parámetros.
 
 ### Graceful degradation
 
@@ -1103,73 +1095,7 @@ Cuando el cache del agente expira (cada 60 min), el primer request de esa empres
 
 ## Variables de Entorno
 
-### OpenAI
-
-| Variable | Default | Descripción |
-|----------|---------|-------------|
-| `OPENAI_MODEL` | `"gpt-4o-mini"` | Modelo a usar (api_key viene per-request en ChatRequest) |
-| `OPENAI_TEMPERATURE` | `0.5` | Temperatura (0.0–2.0) |
-
-### Servidor
-
-| Variable | Default | Descripción |
-|----------|---------|-------------|
-| `SERVER_HOST` | `"0.0.0.0"` | Host de escucha |
-| `SERVER_PORT` | `8002` | Puerto (1–65535) |
-
-### Timeouts
-
-| Variable | Default | Rango | Descripción |
-|----------|---------|-------|-------------|
-| `CHAT_TIMEOUT` | `120` | 30–300 | Timeout total del request (segundos) |
-| `OPENAI_TIMEOUT` | `60` | 1–300 | Timeout de llamada al LLM |
-| `API_TIMEOUT` | `10` | 1–120 | Timeout de APIs externas MaravIA |
-| `MAX_TOKENS` | `2048` | 1–128000 | Max tokens de respuesta del LLM |
-
-### Retry HTTP
-
-| Variable | Default | Descripción |
-|----------|---------|-------------|
-| `HTTP_RETRY_ATTEMPTS` | `3` | Intentos máximos (1–10) |
-| `HTTP_RETRY_WAIT_MIN` | `1` | Espera mínima en segundos (0–30) |
-| `HTTP_RETRY_WAIT_MAX` | `4` | Espera máxima en segundos (1–60) |
-
-### Circuit Breaker
-
-| Variable | Default | Descripción |
-|----------|---------|-------------|
-| `CB_THRESHOLD` | `3` | Fallos para abrir circuit (1–20) |
-| `CB_RESET_TTL` | `300` | Segundos para auto-reset (60–3600) |
-
-### Cache y memoria
-
-| Variable | Default | Descripción |
-|----------|---------|-------------|
-| `AGENT_CACHE_TTL_MINUTES` | `60` | TTL del cache de agentes compilados (5–1440) |
-| `AGENT_CACHE_MAXSIZE` | `500` | Max agentes cacheados (10–5000) |
-| `SEARCH_CACHE_TTL_MINUTES` | `15` | TTL del cache de búsqueda de productos (1–60) |
-| `SEARCH_CACHE_MAXSIZE` | `2000` | Max entradas en cache de búsqueda (10–10000) |
-| `MAX_MESSAGES_HISTORY` | `20` | Ventana de mensajes enviados al LLM (4–200) |
-
-### APIs MaravIA
-
-| Variable | Default |
-|----------|---------|
-| `API_CALENDAR_URL` | `https://api.maravia.pe/servicio/ws_calendario.php` |
-| `API_AGENDAR_REUNION_URL` | `https://api.maravia.pe/servicio/ws_agendar_reunion.php` |
-| `API_INFORMACION_URL` | `https://api.maravia.pe/servicio/ws_informacion_ia.php` |
-| `API_PREGUNTAS_FRECUENTES_URL` | `https://api.maravia.pe/servicio/n8n/ws_preguntas_frecuentes.php` |
-
-### Otros
-
-| Variable | Default | Descripción |
-|----------|---------|-------------|
-| `TIMEZONE` | `"America/Lima"` | Zona horaria para fechas y validaciones |
-| `LOG_LEVEL` | `"INFO"` | Nivel de logging (DEBUG, INFO, WARNING, ERROR, CRITICAL) |
-| `LOG_FILE` | `""` | Ruta de archivo de log (vacío = solo stdout) |
-| `REDIS_URL` | `""` | URL de Redis para AsyncRedisSaver (vacío = InMemorySaver) |
-| `REDIS_CHECKPOINT_TTL_HOURS` | `24` | TTL de sesiones en Redis (0 = sin TTL) |
-| `MAX_CONCURRENT_AGENT` | `50` | Máx invocaciones concurrentes al agente (backpressure) |
+Para la referencia completa de cada variable (que hace, cuando cambiarla, rangos y defaults), ver [CONFIGURACION.md](CONFIGURACION.md).
 
 ---
 
