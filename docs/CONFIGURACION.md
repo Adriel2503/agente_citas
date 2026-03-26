@@ -437,6 +437,12 @@ Maximo de invocaciones concurrentes al agente (LLM + tools). Implementado como `
 - Subir si tienes muchas empresas con alto trafico simultaneo
 - Bajar si el servidor tiene pocos recursos y quieres proteger la memoria/CPU
 
+### `DATABASE_URL`
+
+- **Default:** `""` (vacio)
+
+Reservada para uso futuro. Actualmente no se usa en ningun modulo del agente.
+
 ---
 
 ## 10. URLs de APIs externas

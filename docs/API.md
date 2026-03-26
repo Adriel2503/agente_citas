@@ -455,45 +455,19 @@ El agente siempre responde con HTTP 200. Los errores se comunican en texto dentr
 
 ---
 
-### Error: Timeout
+### Error: Timeout / Fallo al crear agente / Fallo al ejecutar agente
 
-**Causa:** El procesamiento superó `CHAT_TIMEOUT` (default 120s).
+**Causa:** Timeout (`CHAT_TIMEOUT`), error de OpenAI (auth, rate limit, timeout, etc.), o error inesperado.
 
-**Response:**
+**Response:** Todos los errores devuelven el mismo mensaje amigable (el usuario no sabe que hubo un fallo):
 ```json
 {
-  "reply": "La solicitud tardó más de 120s. Por favor, intenta de nuevo.",
+  "reply": "¡Hola! Gracias por tu mensaje. En este momento te voy a derivar con un asesor para que pueda ayudarte mejor.",
   "url": null
 }
 ```
 
----
-
-### Error: Fallo al crear agente
-
-**Causa:** Error al inicializar el modelo LLM o construir el system prompt (ej. `api_key` inválida en el request).
-
-**Response:**
-```json
-{
-  "reply": "Disculpa, tuve un problema de configuración. ¿Podrías intentar nuevamente?",
-  "url": null
-}
-```
-
----
-
-### Error: Fallo al ejecutar agente
-
-**Causa:** Error inesperado durante `agent.ainvoke()` (ej. OpenAI rate limit, error de red).
-
-**Response:**
-```json
-{
-  "reply": "Disculpa, tuve un problema al procesar tu mensaje. ¿Podrías intentar nuevamente?",
-  "url": null
-}
-```
+El detalle del error queda solo en los logs y métricas Prometheus (`citas_chat_errors_total{error_type="..."}`). Ver [METRICS.md](METRICS.md) para los 10 tipos de error mapeados.
 
 ---
 
@@ -607,13 +581,7 @@ Por favor elige otra fecha u hora.
 
 **Causa:** Fallo inesperado en el procesamiento.
 
-**Response:**
-```json
-{
-  "reply": "Error procesando mensaje: <detalle>. Por favor intenta nuevamente.",
-  "url": null
-}
-```
+**Response:** Mismo mensaje amigable que los errores anteriores (derivación a asesor).
 
 ---
 
@@ -664,93 +632,13 @@ Cuando el agente recoge los datos para crear la cita, valida:
 
 ## Métricas
 
-### Endpoint
-
 ```
 GET http://localhost:8002/metrics
 ```
 
-### Contadores
+El agente expone 21 métricas Prometheus (contadores, histogramas, gauges, info) con prefijo `citas_`.
 
-```prometheus
-# ── Conversaciones ──
-citas_chat_requests_total{empresa_id="123"} 150
-citas_chat_errors_total{error_type="context_error"} 2
-citas_chat_errors_total{error_type="agent_creation_error"} 0
-citas_chat_errors_total{error_type="agent_execution_error"} 1
-
-# ── Citas ──
-citas_booking_attempts_total 50
-citas_booking_success_total 42
-citas_booking_failed_total{reason="timeout"} 2
-citas_booking_failed_total{reason="api_error"} 1
-citas_booking_failed_total{reason="invalid_datetime"} 3
-citas_booking_failed_total{reason="circuit_open"} 0
-citas_booking_failed_total{reason="connection_error"} 1
-citas_booking_failed_total{reason="http_500"} 0
-
-# ── Tools ──
-citas_tool_calls_total{tool_name="check_availability"} 98
-citas_tool_calls_total{tool_name="create_booking"} 45
-citas_tool_calls_total{tool_name="search_productos_servicios"} 27
-citas_tool_errors_total{tool_name="create_booking",error_type="TimeoutError"} 1
-
-# ── APIs externas ──
-citas_api_calls_total{endpoint="consultar_disponibilidad",status="success"} 90
-citas_api_calls_total{endpoint="sugerir_horarios",status="success"} 30
-citas_api_calls_total{endpoint="crear_evento",status="success"} 42
-citas_api_calls_total{endpoint="crear_evento",status="error_TimeoutException"} 2
-
-# ── HTTP layer (/api/chat) ──
-citas_http_requests_total{status="success"} 145
-citas_http_requests_total{status="timeout"} 3
-citas_http_requests_total{status="error"} 2
-
-# ── Caches ──
-citas_agent_cache_total{result="hit"} 1200
-citas_agent_cache_total{result="miss"} 15
-citas_search_cache_total{result="hit"} 50
-citas_search_cache_total{result="miss"} 20
-citas_search_cache_total{result="circuit_open"} 0
-```
-
-### Histogramas (latencia)
-
-```prometheus
-# Latencia total del endpoint /api/chat
-citas_http_duration_seconds_bucket{le="0.25"} 5
-citas_http_duration_seconds_bucket{le="1.0"} 20
-citas_http_duration_seconds_bucket{le="5.0"} 100
-citas_http_duration_seconds_bucket{le="10.0"} 140
-citas_http_duration_seconds_bucket{le="120.0"} 150
-
-# Latencia de respuesta del chat (dentro del agente)
-citas_chat_response_duration_seconds_bucket{status="success",le="5.0"} 130
-citas_chat_response_duration_seconds_bucket{status="error",le="5.0"} 2
-
-# Latencia de ejecución de tools
-citas_tool_execution_duration_seconds_bucket{tool_name="check_availability",le="5.0"} 90
-citas_tool_execution_duration_seconds_bucket{tool_name="create_booking",le="10.0"} 44
-citas_tool_execution_duration_seconds_bucket{tool_name="search_productos_servicios",le="5.0"} 25
-
-# Latencia de llamadas a APIs externas
-citas_api_call_duration_seconds_bucket{endpoint="consultar_disponibilidad",le="2.5"} 85
-citas_api_call_duration_seconds_bucket{endpoint="crear_evento",le="5.0"} 40
-
-# Latencia de llamadas al LLM
-citas_llm_call_duration_seconds_bucket{status="success",le="5.0"} 120
-citas_llm_call_duration_seconds_bucket{status="error",le="5.0"} 2
-```
-
-### Gauges y Info
-
-```prometheus
-# Entradas actuales en caches
-citas_cache_entries{cache_type="schedule"} 8
-
-# Información del agente
-citas_info{agent_type="citas",model="gpt-4o-mini",version="2.5.0"} 1
-```
+Para el inventario completo, labels, valores y consultas PromQL, ver [METRICS.md](METRICS.md).
 
 ---
 
