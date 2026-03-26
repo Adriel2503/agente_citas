@@ -581,11 +581,9 @@ curl -X POST http://localhost:8002/api/chat \
 
 ---
 
-### 🔴 Sin autenticación en `/api/chat`
+### ✅ Autenticación en `/api/chat` (implementada, desactivable)
 
-**Qué pasa:** El endpoint no valida quién hace la llamada. Cualquier proceso con acceso de red al puerto 8002 puede invocar al agente. En Easypanel los servicios son internos (no expuestos a internet), pero es una superficie de ataque si la red interna se compromete.
-
-**Solución pendiente:** Header `X-Internal-Token` validado como FastAPI Dependency. Ver `docs/PENDIENTES.md`.
+Header `X-Internal-Token` validado como FastAPI Dependency. Si `INTERNAL_API_TOKEN` está vacío, auth desactivada (no rompe nada). Para activar: configurar el token en el `.env` del agente y en el gateway Go simultáneamente.
 
 ---
 
@@ -617,9 +615,9 @@ Ver [`docs/PENDIENTES.md`](docs/PENDIENTES.md) para el detalle completo.
 
 ```
 Pendiente:
-  ⚠️  C2 — Auth X-Internal-Token en /api/chat
   📋 B1 — slots en CREAR_EVENTO (requiere backend PHP)
   📋 Tests unitarios
+  📋 Activar auth — configurar INTERNAL_API_TOKEN en Easypanel + gateway Go
 ```
 
 ---
