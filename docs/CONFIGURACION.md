@@ -403,9 +403,39 @@ Se usa en dos lugares:
 
 - **Default:** `""` (vacio = usar `InMemorySaver`)
 
-URL de Redis para el checkpointer de conversaciones. **Pendiente de implementacion** — actualmente se ignora y siempre se usa `InMemorySaver`.
+URL de Redis para el checkpointer de conversaciones (`AsyncRedisSaver`). Si esta vacio o Redis no responde, el agente usa `InMemorySaver` como fallback automatico.
 
-**Valor futuro:** `redis://memori_agentes:6379` (instancia que ya existe en Easypanel).
+**Produccion (Easypanel):** `redis://memori_agentes:6379`
+
+**Cuando cambiarlo:** Solo si el hostname o puerto de Redis cambia. Ver [CHECKPOINTER.md](design/CHECKPOINTER.md) para detalles de la arquitectura.
+
+### `REDIS_CHECKPOINT_TTL_HOURS`
+
+- **Default:** `24` horas
+- **Rango:** 0 a 8760 (1 ano)
+
+Cuanto tiempo persiste una conversacion en Redis. Despues del TTL, el checkpoint expira y el proximo mensaje del usuario inicia una conversacion nueva.
+
+**Como funciona:** El TTL se convierte a minutos internamente (`ttl_hours * 60`) y se aplica por key individual — cada write tiene su propio EXPIRE.
+
+**Cuando cambiarlo:**
+- Bajar a 4-8h si las conversaciones de citas son cortas y no necesitan contexto del dia anterior
+- Subir a 48-72h si los prospectos retoman conversaciones despues de un dia
+- `0` = sin expiracion (no recomendado, Redis crece sin limite)
+
+### `MAX_CONCURRENT_AGENT`
+
+- **Default:** `50`
+- **Rango:** 5 a 500
+
+Maximo de invocaciones concurrentes al agente (LLM + tools). Implementado como `asyncio.Semaphore` — el request 51 espera hasta que uno de los 50 activos termine.
+
+**Que pasa si se llena:** El request queda en espera. Si el `CHAT_TIMEOUT` vence antes de que se libere un slot, el usuario recibe un mensaje de error.
+
+**Cuando cambiarlo:**
+- Con < 50 empresas activas, el default es suficiente (1 request por empresa en paralelo)
+- Subir si tienes muchas empresas con alto trafico simultaneo
+- Bajar si el servidor tiene pocos recursos y quieres proteger la memoria/CPU
 
 ---
 
@@ -446,7 +476,7 @@ Estas no son variables de entorno. Se calculan automaticamente a partir de otras
 ### `_SESSION_LOCKS_CLEANUP_THRESHOLD`
 
 - **Valor:** `AGENT_CACHE_MAXSIZE` (default 500)
-- **Definido en:** `agent/agent.py`
+- **Definido en:** `agent/runtime/_cache.py`
 
 Cada sesion de WhatsApp crea un `asyncio.Lock` para evitar que dos mensajes del mismo usuario se procesen en paralelo (doble-click, reintento del gateway). Estos locks se acumulan porque los `session_id` de WhatsApp son permanentes.
 
@@ -457,7 +487,7 @@ Cada sesion de WhatsApp crea un `asyncio.Lock` para evitar que dos mensajes del 
 ### `_LOCKS_CLEANUP_THRESHOLD`
 
 - **Valor:** `AGENT_CACHE_MAXSIZE * 1.5` (default 750)
-- **Definido en:** `agent/agent.py`
+- **Definido en:** `agent/runtime/_cache.py`
 
 Mismo concepto pero para los locks de **creacion de agentes** (uno por empresa).
 
