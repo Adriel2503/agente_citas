@@ -86,7 +86,7 @@ async def check_availability(
         >>> await check_availability("2026-01-27")
         "Horarios sugeridos: Lunes 27/01 - 09:00 AM, 10:00 AM, 02:00 PM..."
         >>> await check_availability("2026-01-31", "2:00 PM")
-        "El 2026-01-31 a las 2:00 PM está disponible. ¿Confirmamos la cita?"
+        "El 2026-01-31 a las 2:00 PM está disponible."
     """
     logger.debug("[TOOL] check_availability - Fecha: %s, Hora: %s", date, time or "no indicada")
 

@@ -105,7 +105,7 @@ class ScheduleRecommender:
                 )
                 if availability.get("available"):
                     return {
-                        "text": f"El {fecha_solicitada} a las {hora_solicitada.strip()} está disponible. ¿Confirmamos la cita?"
+                        "text": f"El {fecha_solicitada} a las {hora_solicitada.strip()} está disponible."
                     }
                 error_msg = availability.get("error") or "Ese horario no está disponible."
                 return {

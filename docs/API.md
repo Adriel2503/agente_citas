@@ -816,7 +816,7 @@ Las tools son funciones internas que el LLM invoca vía function calling. **El g
 
 **Texto que recibe el LLM** (generado por `ScheduleValidator.recommendation()`):
 
-- Con hora disponible: `"El 2026-02-28 a las 3:00 PM está disponible. ¿Confirmamos la cita?"`
+- Con hora disponible: `"El 2026-02-28 a las 3:00 PM está disponible."`
 - Con hora ocupada: `"El horario seleccionado ya está ocupado. ¿Te gustaría que te sugiera otros horarios?"`
 - Sin hora (sugerencias): `"Horarios disponibles encontrados\n\n1. Hoy a las 3:00 PM\n2. Mañana a las 10:00 AM"`
 - Fecha no hoy/mañana: `"Para esa fecha indica una hora que prefieras y la verifico."`
@@ -993,7 +993,7 @@ El agente aplica estas reglas de forma autónoma:
 | Pregunta explícita de horarios (`"¿qué horarios tienen hoy?"`) | Llama `check_availability(date)` sin `time` → sugiere horarios (**solo hoy/mañana**; otras fechas pide hora) |
 | Pregunta general de productos (`"¿qué servicios ofrecen?"`) | Responde con la lista del system prompt |
 | Pregunta específica (`"¿cuánto cuesta X?"`) | Llama `search_productos_servicios(busqueda)` |
-| Tiene fecha + hora + nombre + email | Pide confirmación, luego llama `create_booking` |
+| Tiene fecha + hora + nombre + email | Llama `create_booking` directamente; entrega el resumen en la respuesta posterior |
 
 ### Formato de respuesta (WhatsApp)
 
