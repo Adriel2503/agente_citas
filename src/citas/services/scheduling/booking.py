@@ -75,6 +75,7 @@ async def confirm_booking(
             "correo_cliente": (correo_cliente or "").strip(),
             "correo_usuario": (correo_usuario or "").strip(),
             "agendar_usuario": agendar_usuario,
+            "enviar_recordatorio": 1,
         }
 
         # Circuit breaker: si ws_calendario.php acumula 3 TransportErrors → fallo rápido
