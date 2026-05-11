@@ -61,7 +61,7 @@ async def build_citas_system_prompt(
     variables["hora_actual"] = now.strftime("%I:%M %p")
     dia_nombre = DIAS_NOMBRE[now.weekday()]
     mes_nombre = _MESES_ESPANOL[now.month - 1]
-    variables["fecha_completa"] = f"{now.day} de {mes_nombre} de {now.year} es {dia_nombre}"
+    variables["fecha_completa"] = f"{dia_nombre} {now.day} de {mes_nombre} de {now.year}"
     logger.info(
         "[AGENT] Fecha usada en prompt - Hoy: %s, Hora: %s, Para API: %s",
         variables["fecha_completa"],
