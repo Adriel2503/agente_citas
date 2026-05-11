@@ -6,6 +6,12 @@ services:
       - "8002:8002"
     env_file:
       - .env
+    environment:
+      # Activa archivo de logs rotado diariamente dentro del container.
+      # El directorio se monta como volumen para persistir en el host.
+      LOG_FILE: /app/logs/agent_citas.log
+    volumes:
+      - ./logs:/app/logs
     restart: unless-stopped
     logging:
       driver: json-file

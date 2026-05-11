@@ -33,6 +33,9 @@ COPY src ./src
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
 
+# Directorio de logs con permisos para appuser (persistido via volumen en compose)
+RUN mkdir -p /app/logs && chown appuser:appuser /app/logs
+
 USER appuser
 
 EXPOSE 8002
