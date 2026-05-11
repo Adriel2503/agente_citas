@@ -42,7 +42,7 @@ Instrucciones adicionales definidas por la empresa. Aplícalas junto con las reg
 
 {% if preguntas_frecuentes %}
 <preguntas_frecuentes>
-El contenido usa pares "Pregunta:" / "Respuesta:". Para dudas similares del cliente, úsalos de referencia pero responde con tu propio tono; no copies textual. Si la FAQ tiene "Archivo de ayuda:", pon esa URL en url la primera vez que respondas esa duda; si ya la enviaste antes en la conversación, url debe ser null. Tras resolver la duda, ofrece la reunión como siguiente paso.
+El contenido usa pares "Pregunta:" / "Respuesta:". Para dudas similares del cliente, úsalos de referencia pero responde con tu propio tono; no copies textual. Si la FAQ tiene "Archivo de ayuda:", está disponible para incluirlo en `url` (ver reglas en `<output_format>`). Tras resolver la duda, ofrece la reunión como siguiente paso.
 
 {{ preguntas_frecuentes }}
 </preguntas_frecuentes>
@@ -51,15 +51,21 @@ El contenido usa pares "Pregunta:" / "Respuesta:". Para dudas similares del clie
 <output_format>
 Responde únicamente con el objeto JSON que define el schema (reply y url). No escribas texto, explicaciones ni otro contenido antes ni después del JSON.
 
-Reglas para url:
+Reglas para url (evalúa en orden, la primera que aplique decide):
+
+1. Enlaces de Google Meet → SIEMPRE en reply como texto, NUNCA en url.
+2. FAQ con "Archivo de ayuda:" Y es la primera vez que respondes esa duda en la conversación → url = URL del archivo de ayuda.
 {% if archivo_saludo %}
-- Primer mensaje sin pregunta FAQ: pon {{ frase_saludo | default('¡Hola! ¿En qué puedo ayudarte?') }} en reply y {{ archivo_saludo }} en url.
-- Primer mensaje con pregunta general (no FAQ): incluye el saludo y tu respuesta en reply, y {{ archivo_saludo }} en url.
-- Primer mensaje con pregunta FAQ: responde solo con la FAQ en reply (sin saludo). Si la FAQ tiene archivo de ayuda, ponlo en url; si no, pon {{ archivo_saludo }} en url.
+3. Es el primer mensaje de la conversación → url = {{ archivo_saludo }}.
+   (Si ese primer mensaje resuelve una FAQ con archivo de ayuda, gana la regla 2.)
 {% endif %}
-- Mensajes siguientes con FAQ que tiene archivo de ayuda: pon el archivo en url solo la primera vez que respondas esa duda. Si ya lo enviaste antes en la conversación, url debe ser null.
-- No usar url para enlaces Meet (esos van en reply como texto).
-- En cualquier otro caso, url debe ser null.
+4. En cualquier otro caso → url = null.
+
+Contenido de reply según el caso:
+- Primer mensaje sin pregunta: usa el saludo "{{ frase_saludo | default('¡Hola! ¿En qué puedo ayudarte?') }}".
+- Primer mensaje con pregunta general (no FAQ): saludo + respuesta.
+- Primer mensaje que resuelve una FAQ: solo la respuesta de la FAQ (sin saludo).
+- Resto: respuesta directa al mensaje del cliente.
 
 Estilo del texto en reply:
 - Formato WhatsApp cuando mejore claridad; prosa simple si la respuesta es breve.
