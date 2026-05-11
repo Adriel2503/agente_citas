@@ -1,13 +1,16 @@
 # Pendientes técnicos — agent_citas
 
-Madurez actual: **10 / 10** (auth implementado, solo quedan tests y coordinación backend).
+Madurez actual: **10 / 10** (auth implementado, falta activación en infra y coordinación backend).
+
+Última revisión: 2026-05-11
 
 ---
 
 ## Resueltos
 
-C1 (AsyncRedisSaver), C2 (auth X-Internal-Token), M1 (message window 20 turnos), M2 (circuit breaker calendario),
-M3 (lock cleanup), O2 (health 503), O3 (thundering herd), E1 (mapeo 10 excepciones OpenAI).
+C1 (AsyncRedisSaver), C2 (auth X-Internal-Token, commit a5a8c46), M1 (message window 20 turnos),
+M2 (circuit breaker calendario), M3 (lock cleanup), O2 (health 503), O3 (thundering herd),
+E1 (mapeo 10 excepciones OpenAI).
 
 ---
 
@@ -83,14 +86,35 @@ El counter permite detectar patrones de falla recurrente vía dashboards/alertas
 
 ## 🟢 Diferidas (no urgentes)
 
+### Activar autenticación inter-servicio
+
+C2 ya está implementado en código. Falta:
+
+1. Definir `INTERNAL_API_TOKEN` en Easypanel (variable de entorno del agente)
+2. Configurar el gateway Go para enviar `X-Internal-Token` en cada POST a `/api/chat`
+3. Verificar en logs que las peticiones sin token reciben 401
+
+Si la env var queda vacía, el auth está desactivado (modo degradado, útil para debug local).
+
 ### Tests
 
-No existe suite de tests. Las áreas más importantes a cubrir:
+Suite básica existe en `test/unit/` y `test/integration/`. Cobertura actual:
 
-- `services/booking.py` — `_parse_time_to_24h`, `_build_fecha_inicio_fin`
-- `services/circuit_breaker.py` — transiciones CLOSED → OPEN → reset
+- ✅ `test_validation.py`, `test_cache.py`, `test_content.py`, `test_config.py`, `test_middleware.py`
+- ✅ `test_agent.py`, `test_api.py` (integración)
+
+Pendientes de cubrir:
+
+- `services/scheduling/booking.py` — `confirm_booking`, manejo de CB, parseo de fecha/hora vía `time_parser`
+- `infra/circuit_breaker.py` — transiciones CLOSED → OPEN → reset
+- `services/scheduling/schedule_validator.py` — validación de horarios y slots
 - `agent/agent.py` — `_validate_context`, `_prepare_agent_context`
-- `services/schedule_validator.py` — validación de horarios y slots
+
+### Limpieza
+
+- Borrar `src/citas/agent/prompts/citas_system - legacy.j2` (141 líneas, archivo huérfano)
+- Revisar `docs/MEMORY_PROFILE.md` (estimaciones RAM desactualizadas)
+- METRICS.md: renombrar `agent_citas_*` → `citas_*` (alineado con métricas reales)
 
 ### Formato futuro: respuesta reply + url con imagen de producto
 
@@ -105,8 +129,13 @@ Reglas pendientes de implementar en el prompt:
 ## Resumen de prioridades
 
 ```
-Pendiente:
-  📋 B1 — slots en CREAR_EVENTO (requiere backend PHP)
-  📋 Tests unitarios
-  📋 Activar auth — configurar INTERNAL_API_TOKEN en Easypanel + gateway Go
+🟡 Importantes:
+  B1 — slots en CREAR_EVENTO (bloqueado por backend PHP)
+  B2 — graceful degradation aceptada (riesgo de double booking mitigado con métrica)
+
+🟢 Diferidas:
+  - Activar INTERNAL_API_TOKEN en Easypanel + gateway Go
+  - Tests faltantes: booking, circuit_breaker, schedule_validator
+  - Borrar prompt legacy (citas_system - legacy.j2)
+  - Renombrar métricas agent_citas_* → citas_* en METRICS.md
 ```
