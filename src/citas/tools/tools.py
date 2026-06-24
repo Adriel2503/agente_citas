@@ -150,7 +150,8 @@ async def create_booking(
     - Fecha (YYYY-MM-DD), Hora (HH:MM AM/PM)
     - Nombre completo del cliente, Email del cliente (customer_contact)
 
-    Solo invocar después de confirmar con el cliente fecha, hora, nombre y correo.
+    Invócala en cuanto tengas los 4 datos válidos, sin pedir confirmación previa al cliente.
+    El resumen de la cita se entrega después, a partir de lo que retorne esta herramienta.
 
     La herramienta validará el horario y creará el evento en ws_calendario (CREAR_EVENTO).
     La respuesta puede incluir enlace de videollamada (Google Meet) o mensaje de cita confirmada.
